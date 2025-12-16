@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>FlowApp Database Seeder</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="importmap">
+    {
+      "imports": {
+        "firebase/": "https://aistudiocdn.com/firebase@^12.5.0/"
+      }
+    }
+    </script>
+</head>
+<body class="bg-gray-100 flex items-center justify-center h-screen font-sans">
+    <div class="text-center bg-white p-8 rounded-lg shadow-lg w-full max-w-lg">
+        <h1 class="text-2xl font-bold mb-4 text-slate-800">FlowApp Database Seeder</h1>
+        <p class="mb-6 text-gray-600">
+            This tool will populate your Firestore database with the initial mock data.
+            <br>
+            <strong class="text-red-600">Warning:</strong> This is a destructive action that will delete all data in the collections before seeding.
+        </p>
+        <button id="seedButton" class="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg transition-colors w-full disabled:bg-red-400">
+            Seed Database
+        </button>
+        <div class="mt-4 text-left bg-slate-800 text-white p-4 rounded-lg h-80 overflow-y-auto text-sm font-mono">
+            <pre id="output" class="whitespace-pre-wrap"></pre>
+        </div>
+    </div>
+
+    <script type="module">
+        // This script now directly imports the seedDatabase function, 
+        // which will use the updated firebaseConfig.ts for its connection.
+        import { seedDatabase } from './services/seedDatabase.ts';
+
+        const seedButton = document.getElementById('seedButton');
+        const output = document.getElementById('output');
+
+        function log(message) {
+            console.log(message);
+            if (output) {
+                output.textContent += message + '\n';
+                output.scrollTop = output.scrollHeight;
+            }
+        }
+
+        if (seedButton) {
+            seedButton.addEventListener('click', async () => {
+                if (!confirm("Are you sure you want to delete all existing data and seed the database? This cannot be undone.")) {
+                    return;
+                }
+
+                seedButton.disabled = true;
+                seedButton.textContent = 'Seeding...';
+                output.textContent = '';
+
+                try {
+                    log('Starting database seed... Please wait.');
+                    const result = await seedDatabase();
+                    log('--------------------');
+                    log(result);
+                } catch (error) {
+                    log('\n--- AN ERROR OCCURRED ---');
+                    log('Please check the developer console for more details.');
+                    log('Common issues:');
+                    log('- Make sure you have pasted your credentials into firebaseConfig.ts.');
+                    log('- Ensure your Firestore security rules are set to test mode to allow writes.');
+                    log(error.message);
+                    console.error(error);
+                } finally {
+                    seedButton.disabled = false;
+                    seedButton.textContent = 'Seed Database';
+                }
+            });
+        }
+
+        log('Ready to seed.');
+        log('Please ensure you have updated firebaseConfig.ts with your credentials from the Firebase console.');
+
+    </script>
+</body>
+</html>

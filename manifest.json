@@ -1,0 +1,20 @@
+{
+  "short_name": "FlowApp",
+  "name": "FlowApp Restaurant Ordering",
+  "icons": [
+    {
+      "src": "/icons/icon-192x192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#F97316",
+  "background_color": "#F1F5F9"
+}
