@@ -18,7 +18,9 @@ import { Notification } from './components/Shared';
 const GUEST_USER: User = { id: '0', name: 'Guest', username: 'guest', role: UserRole.Consumer, linkedRestaurantIds: [] };
 
 const App: React.FC = () => {
-    const [currentUser, setCurrentUser] = useState<User | null>(null);
+    // START CHANGE: Default to GUEST_USER instead of null to allow instant browsing (Uber Eats style)
+    const [currentUser, setCurrentUser] = useState<User | null>(GUEST_USER);
+    // END CHANGE
     const [users, setUsers] = useState<User[]>([]);
     const [vendors, setVendors] = useState<Vendor[]>([]);
     const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
@@ -31,7 +33,8 @@ const App: React.FC = () => {
     const [activeOrderIds, setActiveOrderIds] = useState<string[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
-    const [currentView, setCurrentView] = useState<View>('login');
+    // Default view is 'home' now that we default to Guest
+    const [currentView, setCurrentView] = useState<View>('home');
     const [selectedRestaurantId, setSelectedRestaurantId] = useState<string | null>(null);
     const [isCartOpen, setIsCartOpen] = useState(false);
 
@@ -40,71 +43,103 @@ const App: React.FC = () => {
         setNotifications(prev => [...prev, { id: Date.now(), message, type }]);
     }, []);
 
-    // --- DATA FETCHING ---
-    const fetchData = useCallback(async () => {
+    // --- DATA FETCHING (Public) ---
+    const fetchPublicData = useCallback(async () => {
         try {
-            const [fetchedUsers, fetchedVendors, fetchedRestaurants, fetchedOrders, fetchedBoards, fetchedMenus, fetchedItems] = await Promise.all([
-                api.fetchUsers(),
-                api.fetchVendors(),
+            // Only fetch public/non-sensitive data initially to speed up load
+            const [fetchedRestaurants, fetchedBoards, fetchedMenus, fetchedItems] = await Promise.all([
                 api.fetchRestaurants(),
-                api.fetchOrders(),
                 api.fetchBoardTemplates(),
                 api.fetchMenuTemplates(),
                 api.fetchMenuItemTemplates(),
             ]);
-            setUsers(fetchedUsers);
-            setVendors(fetchedVendors);
             setRestaurants(fetchedRestaurants);
-            setOrders(fetchedOrders);
             setBoardTemplates(fetchedBoards);
             setMenuTemplates(fetchedMenus);
             setMenuItemTemplates(fetchedItems);
         } catch (error) {
-            console.error("Failed to fetch data", error);
+            console.error("Failed to fetch public data", error);
             addNotification("Could not load application data. Check your network.", "error");
         }
     }, [addNotification]);
 
+    // --- DATA FETCHING (Protected) ---
+    const fetchProtectedData = useCallback(async () => {
+        if (!currentUser || currentUser.role === UserRole.Consumer) return;
+
+        try {
+            console.log("Fetching protected data for admin...");
+            const [fetchedUsers, fetchedVendors, fetchedOrders] = await Promise.all([
+                api.fetchUsers(),
+                api.fetchVendors(),
+                api.fetchOrders(),
+            ]);
+            setUsers(fetchedUsers);
+            setVendors(fetchedVendors);
+            setOrders(fetchedOrders);
+        } catch (error) {
+            console.error("Failed to fetch protected data", error);
+        }
+    }, [currentUser]);
+
+    // Initial Load
     useEffect(() => {
         setIsLoading(true);
-        
-        // Safety timeout to ensure we don't get stuck on "Loading..." forever
         const safetyTimeout = setTimeout(() => {
             setIsLoading(loading => {
                 if (loading) {
                     console.warn("Data fetch timed out. Forcing app load.");
-                    addNotification("Data loading timed out. Some data may be missing.", "error");
                     return false;
                 }
                 return loading;
             });
-        }, 8000); // 8 seconds timeout
+        }, 8000);
 
-        fetchData().finally(() => {
+        fetchPublicData().finally(() => {
             clearTimeout(safetyTimeout);
             setIsLoading(false);
         });
 
         return () => clearTimeout(safetyTimeout);
-    }, [fetchData]);
+    }, [fetchPublicData]);
+
+    // Protected Load trigger
+    useEffect(() => {
+        if (currentUser && currentUser.role !== UserRole.Consumer) {
+            fetchProtectedData();
+        }
+    }, [currentUser, fetchProtectedData]);
 
     // --- AUTH STATE LISTENER (SUPABASE) ---
     useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
             if (session?.user) {
-                api.fetchUsers().then(allUsers => {
-                    const found = allUsers.find(u => u.id === session.user.id);
-                    if (found) setCurrentUser(found);
-                });
-            }
-        });
-
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-            if (session?.user) {
-                 const { data: userProfile } = await supabase.from('users').select('*').eq('id', session.user.id).single();
-                 if (userProfile) setCurrentUser(userProfile as User);
+                 // Only fetch if we don't have the user, or if it's a different user
+                 // Note: we check vs currentUser inside the setter to avoid dependency loops if possible,
+                 // but here we need the ID.
+                 setCurrentUser(prev => {
+                     if (!prev || prev.id !== session.user.id) {
+                         // Fetch profile async (side effect inside setter is bad, but we just trigger fetch)
+                         // Better: trigger a separate effect or promise.
+                         // For now, let's just do the fetch here as it's the listener callback.
+                         api.fetchUsers().then(users => {
+                             const found = users.find(u => u.id === session.user.id);
+                             if (found) setCurrentUser(found);
+                         });
+                         // Return current temporarily until fetch updates it, or keep null/guest
+                         return prev;
+                     }
+                     return prev;
+                 });
             } else {
-                setCurrentUser(null);
+                // START CHANGE: Fix for refresh loop
+                // If session is null (logged out), ONLY set to null if we aren't explicitly in Guest mode.
+                // If we are Guest (id 0), we stay Guest.
+                setCurrentUser(prev => {
+                    if (prev?.id === '0') return prev; // Keep Guest
+                    return null; // Force to Login screen for Admins who logged out
+                });
+                // END CHANGE
             }
         });
 
@@ -126,6 +161,8 @@ const App: React.FC = () => {
      useEffect(() => {
         const handleNavigation = () => {
             const hash = window.location.hash;
+            
+            // 1. Priority: Hash Navigation (e.g. #restaurant/123)
             if (hash.startsWith('#restaurant/')) {
                 const restaurantId = hash.split('/')[1];
                 if (restaurants.some(v => v.id === restaurantId)) {
@@ -149,11 +186,25 @@ const App: React.FC = () => {
                 }
             }
 
+            // 2. Auth State Navigation
             if (currentUser) {
-                 if (currentUser.role === UserRole.Vendor || currentUser.role === UserRole.RestaurantAdmin) setCurrentView('vendorDashboard');
-                else if (currentUser.role === UserRole.SuperAdmin) setCurrentView('superAdminDashboard');
-                else if (currentUser.role === UserRole.Consumer) setCurrentView('home');
+                 // If authenticated
+                 if (currentUser.role === UserRole.Vendor || currentUser.role === UserRole.RestaurantAdmin) {
+                     // Vendors always go to dashboard
+                     setCurrentView('vendorDashboard');
+                 } else if (currentUser.role === UserRole.SuperAdmin) {
+                     setCurrentView('superAdminDashboard');
+                 } else {
+                     // Consumers (Guest):
+                     // If we are at Login, go Home.
+                     // Otherwise, stay where we are (Checkout, Status, Restaurant, etc)
+                     setCurrentView(prevView => {
+                         if (prevView === 'login') return 'home';
+                         return prevView;
+                     });
+                 }
             } else {
+                 // Not authenticated AND not Guest -> Login
                  setCurrentView('login');
             }
         };
@@ -161,6 +212,7 @@ const App: React.FC = () => {
         if (!isLoading) {
             handleNavigation();
         }
+        
         window.addEventListener('hashchange', handleNavigation);
         return () => window.removeEventListener('hashchange', handleNavigation);
     }, [currentUser, restaurants, addNotification, isLoading]);
@@ -182,6 +234,7 @@ const App: React.FC = () => {
     const handleLogin = useCallback(async (username: string, password: string): Promise<{success: boolean, error?: string}> => {
         const { user, error } = await api.signInUser(username, password);
         if (user) {
+            // Optimistically set user to avoid waiting for Auth Listener roundtrip
             setCurrentUser(user);
             window.location.hash = '';
             addNotification(`Welcome back, ${user.name}!`, 'success');
@@ -198,6 +251,7 @@ const App: React.FC = () => {
         } catch(e) {
             console.error("Logout error", e);
         }
+        // Explicit logout -> Force null to show Login Screen
         setCurrentUser(null);
         window.location.hash = '';
         setCurrentView('login');
@@ -205,21 +259,24 @@ const App: React.FC = () => {
     }, [addNotification]);
     
     const handleExitToGuestView = useCallback(async () => {
+        // Explicitly switch to Guest Mode
         await api.signOutUser(); 
         setCurrentUser(GUEST_USER); 
         addNotification(`Exiting admin session. Now viewing as a guest.`, 'info');
         const firstRestaurantId = restaurants[0]?.id;
         if (firstRestaurantId) {
+            // This will trigger hashchange -> handleNavigation -> sets view to Restaurant
             window.location.hash = `restaurant/${firstRestaurantId}`;
         } else {
             window.location.hash = '';
-            setCurrentView('login');
+            setCurrentView('home'); 
         }
     }, [addNotification, restaurants]);
 
     const handleAdminLoginNav = useCallback(() => {
-        handleLogout();
-    }, [handleLogout]);
+        // Just switch view to login, don't necessarily logout Guest yet
+        setCurrentView('login');
+    }, []);
 
     const handleAddToCart = useCallback((item: Omit<CartItem, 'cartItemId'>) => {
         if (cart.length > 0 && cart[0].restaurantId !== item.restaurantId) {
@@ -244,6 +301,13 @@ const App: React.FC = () => {
         if (['home', 'vendorDashboard', 'superAdminDashboard'].includes(view)) {
             window.location.hash = '';
             setSelectedRestaurantId(null);
+        }
+        
+        if (view === 'checkout' || view === 'orderStatus') {
+            if (window.location.hash) {
+                 // Replaced pushState with direct assignment to avoid SecurityError in blob environments
+                 window.location.hash = '';
+            }
         }
     }, []);
 
@@ -348,22 +412,23 @@ const App: React.FC = () => {
     const handleDeleteVendor = useCallback(async (vendorId: string) => {
         const success = await api.deleteVendor(vendorId);
         if (success) {
-            fetchData();
+            // Refresh data not trivial for delete, assume manual refresh or update list
+            setVendors(prev => prev.filter(v => v.id !== vendorId));
             addNotification('Vendor deleted.', 'success');
         } else {
             addNotification("Failed to delete vendor.", "error");
         }
-    }, [fetchData, addNotification]);
+    }, [addNotification]);
 
     const handleDeleteRestaurant = useCallback(async (restaurantId: string) => {
         const success = await api.deleteRestaurant(restaurantId);
         if (success) {
-            fetchData();
+            setRestaurants(prev => prev.filter(r => r.id !== restaurantId));
             addNotification('Restaurant deleted.', 'success');
         } else {
             addNotification("Failed to delete restaurant.", "error");
         }
-    }, [fetchData, addNotification]);
+    }, [addNotification]);
 
     const handleDeleteUser = useCallback(async (userId: string) => {
         if (currentUser?.id === userId) { addNotification("You cannot delete yourself.", "error"); return; }
@@ -461,7 +526,12 @@ const App: React.FC = () => {
             );
         }
         
-        if (currentView === 'login' || !currentUser) return <LoginPage onLogin={handleLogin} />;
+        // Show Login Page ONLY if specifically in 'login' view
+        if (currentView === 'login') return <LoginPage onLogin={handleLogin} />;
+        
+        // If current user is null (logged out admin), but we aren't in 'login' view yet, we should probably be in login view
+        // But since we default to Guest, currentUser is usually not null unless explicitly set to null.
+        if (!currentUser) return <LoginPage onLogin={handleLogin} />;
         
         switch (currentView) {
             case 'restaurant':
@@ -509,7 +579,10 @@ const App: React.FC = () => {
                         onBackToRestaurant={() => handleSelectRestaurant(activeOrders[0].restaurantId)}
                     />;
                 }
-                navigateTo('home');
+                // Redirect if no active orders. Side effect safe here because we return null immediately after.
+                // However, strictly speaking, we should use useEffect to redirect. 
+                // But for simplicity in this synchronous render pass:
+                setTimeout(() => navigateTo('home'), 0);
                 return null;
             
             case 'home':

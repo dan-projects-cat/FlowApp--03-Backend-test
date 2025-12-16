@@ -12,7 +12,7 @@ const fetchTable = async <T>(tableName: string): Promise<T[]> => {
     try {
         const { data, error } = await supabase.from(tableName).select('*');
         if (error) {
-            console.error(`Error fetching ${tableName}:`, error);
+            console.warn(`[Fetch ${tableName}] Error:`, error.message);
             // Return empty array on error to prevent app crash
             return [];
         }
@@ -35,58 +35,72 @@ const fetchTable = async <T>(tableName: string): Promise<T[]> => {
 // --- Auth Functions ---
 
 export const signInUser = async (username: string, password?: string): Promise<{ user: User | null, error?: string }> => {
+    console.time("SignInProcess");
     if (!password) return { user: null, error: "Password is required" };
     const email = toEmail(username);
     
     try {
+        console.log(`[Auth] Attempting login for ${email}...`);
+        console.time("SupabaseAuth");
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
             email,
             password
         });
+        console.timeEnd("SupabaseAuth");
 
         if (authError) {
-            console.error("Login failed:", authError.message);
+            console.error("[Auth] Login failed:", authError.message);
+            console.timeEnd("SignInProcess");
             return { user: null, error: authError.message };
         }
 
         if (!authData.user) {
-             return { user: null, error: "Authentication failed." };
+             console.timeEnd("SignInProcess");
+             return { user: null, error: "Authentication failed (No user returned)." };
         }
 
         // Fetch User Profile from public 'users' table
+        console.time("FetchProfile");
         const { data: userData, error: userError } = await supabase
             .from('users')
             .select('*')
             .eq('id', authData.user.id)
             .single();
+        console.timeEnd("FetchProfile");
             
         // RECOVERY LOGIC:
         if (userError || !userData) {
-             console.warn("User authenticated but profile fetch failed. Attempting auto-creation/recovery...", userError);
+             console.warn("[Auth] Profile fetch failed. Attempting auto-creation/recovery...", userError?.message);
 
              const defaultRole = username === 'superadmin' ? UserRole.SuperAdmin : UserRole.Consumer;
              
              // Try to create the missing profile
+             console.time("ProfileRecovery");
              const { data: newProfile, error: createError } = await supabase.from('users').upsert({
                  id: authData.user.id,
                  username: username,
                  name: username.charAt(0).toUpperCase() + username.slice(1), // Capitalize
                  role: defaultRole,
              }).select().single();
+             console.timeEnd("ProfileRecovery");
 
              if (createError) {
-                 console.error("Critical: Failed to auto-create missing user profile.", createError);
-                 return { user: null, error: "Profile creation failed. Check database permissions." };
+                 console.error("[Auth] Critical: Failed to auto-create profile.", createError.message);
+                 console.timeEnd("SignInProcess");
+                 return { user: null, error: "Profile missing and creation failed. Check database permissions (RLS)." };
              }
              
-             console.log("Successfully auto-created user profile.");
+             console.log("[Auth] Successfully auto-created user profile.");
+             console.timeEnd("SignInProcess");
              return { user: newProfile as User };
         }
 
+        console.timeEnd("SignInProcess");
         return { user: userData as User };
 
     } catch (error: any) {
-        console.error("Login exception:", error.message);
+        console.error("[Auth] Exception:", error.message);
+        console.timeEnd("SignInProcess");
         return { user: null, error: error.message };
     }
 };
@@ -112,6 +126,7 @@ export const fetchMenuTemplates = () => fetchTable<MenuTemplate>('menuTemplates'
 // --- Mutation Functions ---
 
 export const createVendor = async (vendorName: string, adminUsername: string, adminPassword: string) => {
+    console.log(`Creating Vendor: ${vendorName}`);
     // 1. Create Vendor
     const { data: vendorData, error: vendorError } = await supabase
         .from('vendors')
@@ -119,7 +134,7 @@ export const createVendor = async (vendorName: string, adminUsername: string, ad
         .select()
         .single();
         
-    if (vendorError) { console.error(vendorError); return null; }
+    if (vendorError) { console.error("Create Vendor Error:", vendorError); return null; }
     
     // 2. Create Auth User
     const email = toEmail(adminUsername);
@@ -128,7 +143,7 @@ export const createVendor = async (vendorName: string, adminUsername: string, ad
         password: adminPassword,
     });
     
-    if (authError || !authData.user) { console.error("Auth creation failed", authError); return null; }
+    if (authError || !authData.user) { console.error("Create Auth Error:", authError); return null; }
 
     // 3. Create Public Profile
     const newAdminUser = {
@@ -141,7 +156,7 @@ export const createVendor = async (vendorName: string, adminUsername: string, ad
     
     const { error: profileError } = await supabase.from('users').insert(newAdminUser);
     
-    if (profileError) { console.error("Profile creation failed", profileError); return null; }
+    if (profileError) { console.error("Create Profile Error:", profileError); return null; }
 
     return { newVendor: vendorData as Vendor, newVendorAdmin: newAdminUser as User };
 };
@@ -185,6 +200,7 @@ export const updateUser = async (updated: User) => {
     // Don't send password to public table
     const { password, ...safeData } = data as any; 
     const { data: res, error } = await supabase.from('users').update(safeData).eq('id', id).select().single();
+    if (error) console.error("Update User Error:", error);
     return res as User;
 };
 
@@ -224,6 +240,8 @@ export const createOrder = async (orderData: { restaurantId: string, items: Cart
     };
     
     const { data, error } = await supabase.from('orders').insert(newOrder).select().single();
+    if (error) console.error("Create Order Error:", error);
+    
     if(data) {
         data.orderTime = new Date(data.orderTime);
         data.lastUpdateTime = new Date(data.lastUpdateTime);
