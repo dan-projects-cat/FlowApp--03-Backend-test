@@ -1,6 +1,8 @@
+
 import React, { useState, memo } from 'react';
 import { Vendor, User, Restaurant } from '../types';
-import { UserIcon, TrashIcon, EditIcon } from './Shared';
+import { UserIcon, TrashIcon, EditIcon, SparklesIcon } from './Shared';
+import { seedDatabase } from '../services/seedDatabase';
 
 const ConfirmationModal: React.FC<{
     title: string;
@@ -104,9 +106,10 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ vendors, rest
     const [vendorName, setVendorName] = useState('');
     const [adminUsername, setAdminUsername] = useState('');
     const [adminPassword, setAdminPassword] = useState('');
-    const [deleteConfirmation, setDeleteConfirmation] = useState<{ type: 'vendor' | 'restaurant' | 'user', data: any } | null>(null);
+    const [deleteConfirmation, setDeleteConfirmation] = useState<{ type: 'vendor' | 'restaurant' | 'user' | 'seed', data: any } | null>(null);
     const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
     const [editingUser, setEditingUser] = useState<User | null>(null);
+    const [isSeeding, setIsSeeding] = useState(false);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -116,26 +119,50 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ vendors, rest
         setAdminPassword('');
     };
     
-    const handleDelete = () => {
+    const handleDelete = async () => {
         if (!deleteConfirmation) return;
         
-        switch (deleteConfirmation.type) {
-            case 'vendor':
-                onDeleteVendor(deleteConfirmation.data.id);
-                break;
-            case 'restaurant':
-                onDeleteRestaurant(deleteConfirmation.data.id);
-                break;
-            case 'user':
-                onDeleteUser(deleteConfirmation.data.id);
-                break;
+        if (deleteConfirmation.type === 'seed') {
+            setIsSeeding(true);
+            try {
+                const log = await seedDatabase();
+                alert("Database Seeded Successfully!\n" + log);
+                window.location.reload();
+            } catch (e: any) {
+                alert("Error seeding database: " + e.message);
+            } finally {
+                setIsSeeding(false);
+            }
+        } else {
+             switch (deleteConfirmation.type) {
+                case 'vendor':
+                    onDeleteVendor(deleteConfirmation.data.id);
+                    break;
+                case 'restaurant':
+                    onDeleteRestaurant(deleteConfirmation.data.id);
+                    break;
+                case 'user':
+                    onDeleteUser(deleteConfirmation.data.id);
+                    break;
+            }
         }
         setDeleteConfirmation(null);
     }
 
   return (
     <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <h2 className="text-3xl font-extrabold text-secondary mb-6">Super Admin Dashboard</h2>
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-3xl font-extrabold text-secondary">Super Admin Dashboard</h2>
+        <button 
+            onClick={() => setDeleteConfirmation({ type: 'seed', data: {} })}
+            className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-bold transition-colors shadow"
+            disabled={isSeeding}
+        >
+            <SparklesIcon className="w-5 h-5" />
+            <span>{isSeeding ? 'Seeding...' : 'Reset & Seed Database'}</span>
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
         <div className="lg:col-span-2 space-y-8">
@@ -216,11 +243,14 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ vendors, rest
       </div>
        {deleteConfirmation && (
             <ConfirmationModal 
-                title={`Delete ${deleteConfirmation.type.charAt(0).toUpperCase() + deleteConfirmation.type.slice(1)}`}
-                message={`Are you sure you want to permanently delete "${deleteConfirmation.data.name}"? This action cannot be undone.`}
+                title={deleteConfirmation.type === 'seed' ? 'Reset Database' : `Delete ${deleteConfirmation.type.charAt(0).toUpperCase() + deleteConfirmation.type.slice(1)}`}
+                message={deleteConfirmation.type === 'seed' 
+                    ? "WARNING: This will delete ALL existing data (restaurants, orders, menus) in the database and reset it to the default seed data. This cannot be undone."
+                    : `Are you sure you want to permanently delete "${deleteConfirmation.data.name}"? This action cannot be undone.`
+                }
                 onConfirm={handleDelete}
                 onCancel={() => setDeleteConfirmation(null)}
-                confirmText="DELETE"
+                confirmText={deleteConfirmation.type === 'seed' ? "RESET" : "DELETE"}
             />
         )}
         {editingVendor && <VendorModal vendor={editingVendor} onSave={onUpdateVendor} onClose={() => setEditingVendor(null)} />}

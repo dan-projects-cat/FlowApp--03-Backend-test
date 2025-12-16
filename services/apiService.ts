@@ -1,237 +1,272 @@
-import { USERS, VENDORS, RESTAURANTS, ORDERS, BOARD_TEMPLATES, MENU_TEMPLATES, MENU_ITEM_TEMPLATES } from '../data';
+
+import { supabase } from '../supabaseClient';
 import { User, Vendor, Restaurant, Order, UserRole, RestaurantPermissions, BoardTemplate, MenuItemTemplate, MenuTemplate, CartItem, OrderItem } from '../types';
 
-// Custom deep copy to handle Date objects correctly, which JSON.stringify/parse does not.
-const deepCopy = <T>(data: T): T => {
-    if (data === null || typeof data !== 'object') {
-        return data;
-    }
+// --- Helper Functions ---
 
-    if (data instanceof Date) {
-        return new Date(data.getTime()) as any;
-    }
+// Fake email generator for username-based login
+const toEmail = (username: string) => `${username.toLowerCase().replace(/\s/g, '')}@flowapp.test`;
 
-    if (Array.isArray(data)) {
-        return data.map(item => deepCopy(item)) as any;
-    }
-
-    const copied: { [key: string]: any } = {};
-    for (const key in data) {
-        if (Object.prototype.hasOwnProperty.call(data, key)) {
-            copied[key] = deepCopy(data[key]);
+// Generic Fetch Wrapper
+const fetchTable = async <T>(tableName: string): Promise<T[]> => {
+    try {
+        const { data, error } = await supabase.from(tableName).select('*');
+        if (error) {
+            console.error(`Error fetching ${tableName}:`, error);
+            // Return empty array on error to prevent app crash
+            return [];
         }
+        
+        if (!data) return [];
+
+        // Supabase returns JSON columns as objects automatically, which matches our types mostly.
+        // Date strings from Postgres (timestamptz) need to be converted to JS Date objects if the app expects Date objects.
+        return data.map((item: any) => {
+            if (item.orderTime) item.orderTime = new Date(item.orderTime);
+            if (item.lastUpdateTime) item.lastUpdateTime = new Date(item.lastUpdateTime);
+            return item;
+        }) as T[];
+    } catch (e) {
+        console.error(`Unexpected error fetching ${tableName}:`, e);
+        return [];
     }
-    return copied as T;
 };
 
-
-// Deep copy initial data to simulate a mutable backend store
-let users: User[] = deepCopy(USERS);
-let vendors: Vendor[] = deepCopy(VENDORS);
-let restaurants: Restaurant[] = deepCopy(RESTAURANTS);
-let orders: Order[] = deepCopy(ORDERS);
-let boardTemplates: BoardTemplate[] = deepCopy(BOARD_TEMPLATES);
-let menuItemTemplates: MenuItemTemplate[] = deepCopy(MENU_ITEM_TEMPLATES);
-let menuTemplates: MenuTemplate[] = deepCopy(MENU_TEMPLATES);
-
-
-// Helper to simulate async operations
-const simulateDelay = <T>(data: T): Promise<T> => new Promise(resolve => setTimeout(() => resolve(deepCopy(data)), 200));
-
 // --- Auth Functions ---
-export const signInUser = async (username: string, password?: string): Promise<User | null> => {
-    if (!password) return simulateDelay(null);
-    // DANGER: INSECURE PASSWORD CHECK FOR DEMO PURPOSES.
-    const user = users.find(u => u.username === username && u.password === password);
-    return simulateDelay(user ? user : null);
+
+export const signInUser = async (username: string, password?: string): Promise<{ user: User | null, error?: string }> => {
+    if (!password) return { user: null, error: "Password is required" };
+    const email = toEmail(username);
+    
+    try {
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email,
+            password
+        });
+
+        if (authError) {
+            console.error("Login failed:", authError.message);
+            return { user: null, error: authError.message };
+        }
+
+        if (!authData.user) {
+             return { user: null, error: "Authentication failed." };
+        }
+
+        // Fetch User Profile from public 'users' table
+        const { data: userData, error: userError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', authData.user.id)
+            .single();
+            
+        // RECOVERY LOGIC:
+        if (userError || !userData) {
+             console.warn("User authenticated but profile fetch failed. Attempting auto-creation/recovery...", userError);
+
+             const defaultRole = username === 'superadmin' ? UserRole.SuperAdmin : UserRole.Consumer;
+             
+             // Try to create the missing profile
+             const { data: newProfile, error: createError } = await supabase.from('users').upsert({
+                 id: authData.user.id,
+                 username: username,
+                 name: username.charAt(0).toUpperCase() + username.slice(1), // Capitalize
+                 role: defaultRole,
+             }).select().single();
+
+             if (createError) {
+                 console.error("Critical: Failed to auto-create missing user profile.", createError);
+                 return { user: null, error: "Profile creation failed. Check database permissions." };
+             }
+             
+             console.log("Successfully auto-created user profile.");
+             return { user: newProfile as User };
+        }
+
+        return { user: userData as User };
+
+    } catch (error: any) {
+        console.error("Login exception:", error.message);
+        return { user: null, error: error.message };
+    }
 };
 
 export const signOutUser = async (): Promise<void> => {
-    return Promise.resolve();
+    try {
+        await supabase.auth.signOut();
+    } catch (error) {
+        console.error("Error signing out:", error);
+    }
 };
 
-// --- Data Fetching Functions ---
-export const fetchUsers = (): Promise<User[]> => simulateDelay(users);
-export const fetchVendors = (): Promise<Vendor[]> => simulateDelay(vendors);
-export const fetchRestaurants = (): Promise<Restaurant[]> => simulateDelay(restaurants);
-export const fetchOrders = (): Promise<Order[]> => simulateDelay(orders);
-export const fetchBoardTemplates = (): Promise<BoardTemplate[]> => simulateDelay(boardTemplates);
-export const fetchMenuItemTemplates = (): Promise<MenuItemTemplate[]> => simulateDelay(menuItemTemplates);
-export const fetchMenuTemplates = (): Promise<MenuTemplate[]> => simulateDelay(menuTemplates);
+// --- Fetch Functions ---
+export const fetchUsers = () => fetchTable<User>('users');
+export const fetchVendors = () => fetchTable<Vendor>('vendors');
+export const fetchRestaurants = () => fetchTable<Restaurant>('restaurants');
+export const fetchOrders = () => fetchTable<Order>('orders');
+export const fetchBoardTemplates = () => fetchTable<BoardTemplate>('boardTemplates');
+export const fetchMenuItemTemplates = () => fetchTable<MenuItemTemplate>('menuItemTemplates');
+export const fetchMenuTemplates = () => fetchTable<MenuTemplate>('menuTemplates');
 
-// --- Data Mutation Functions ---
 
-export const createVendor = async (vendorName: string, adminUsername: string, adminPassword: string): Promise<{ newVendor: Vendor, newVendorAdmin: User } | null> => {
-    const newVendor: Vendor = { id: `v${Date.now()}`, name: vendorName };
-    vendors.push(newVendor);
+// --- Mutation Functions ---
+
+export const createVendor = async (vendorName: string, adminUsername: string, adminPassword: string) => {
+    // 1. Create Vendor
+    const { data: vendorData, error: vendorError } = await supabase
+        .from('vendors')
+        .insert({ name: vendorName })
+        .select()
+        .single();
+        
+    if (vendorError) { console.error(vendorError); return null; }
     
-    const newVendorAdmin: User = {
-        id: `u${Date.now()}`, name: `${vendorName} Admin`, username: adminUsername,
-        password: adminPassword, role: UserRole.Vendor, vendorId: newVendor.id,
-    };
-    users.push(newVendorAdmin);
+    // 2. Create Auth User
+    const email = toEmail(adminUsername);
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+        email,
+        password: adminPassword,
+    });
+    
+    if (authError || !authData.user) { console.error("Auth creation failed", authError); return null; }
 
-    return simulateDelay({ newVendor, newVendorAdmin });
+    // 3. Create Public Profile
+    const newAdminUser = {
+        id: authData.user.id,
+        name: `${vendorName} Admin`,
+        username: adminUsername,
+        role: UserRole.Vendor,
+        vendorId: vendorData.id
+    };
+    
+    const { error: profileError } = await supabase.from('users').insert(newAdminUser);
+    
+    if (profileError) { console.error("Profile creation failed", profileError); return null; }
+
+    return { newVendor: vendorData as Vendor, newVendorAdmin: newAdminUser as User };
 };
 
-export const updateVendor = async (updated: Vendor): Promise<Vendor | null> => {
-    vendors = vendors.map(v => v.id === updated.id ? updated : v);
-    return simulateDelay(updated);
+export const updateVendor = async (updated: Vendor) => {
+    const { data, error } = await supabase.from('vendors').update({ name: updated.name }).eq('id', updated.id).select().single();
+    return data as Vendor;
 };
 
 export const deleteVendor = async (vendorId: string): Promise<boolean> => {
-    vendors = vendors.filter(v => v.id !== vendorId);
-    restaurants = restaurants.filter(r => r.vendorId !== vendorId);
-    users = users.filter(u => u.vendorId !== vendorId);
-    boardTemplates = boardTemplates.filter(t => t.vendorId !== vendorId);
-    menuTemplates = menuTemplates.filter(t => t.vendorId !== vendorId);
-    menuItemTemplates = menuItemTemplates.filter(t => t.vendorId !== vendorId);
-    return simulateDelay(true);
+    // Cascade delete manually if not set in DB
+    await supabase.from('restaurants').delete().eq('vendorId', vendorId);
+    await supabase.from('users').delete().eq('vendorId', vendorId);
+    await supabase.from('boardTemplates').delete().eq('vendorId', vendorId);
+    await supabase.from('menuTemplates').delete().eq('vendorId', vendorId);
+    await supabase.from('menuItemTemplates').delete().eq('vendorId', vendorId);
+    
+    const { error } = await supabase.from('vendors').delete().eq('id', vendorId);
+    return !error;
 };
 
-export const createRestaurant = async (newRestaurantData: Omit<Restaurant, 'id'>): Promise<Restaurant | null> => {
-    const newRestaurant: Restaurant = { ...newRestaurantData, id: `r${Date.now()}` };
-    restaurants.push(newRestaurant);
-    return simulateDelay(newRestaurant);
+export const createRestaurant = async (data: Omit<Restaurant, 'id'>) => {
+    const { data: res, error } = await supabase.from('restaurants').insert(data).select().single();
+    if (error) console.error(error);
+    return res as Restaurant;
 };
 
-export const updateRestaurant = async (updated: Restaurant): Promise<Restaurant | null> => {
-    restaurants = restaurants.map(r => r.id === updated.id ? updated : r);
-    return simulateDelay(updated);
+export const updateRestaurant = async (updated: Restaurant) => {
+    const { id, ...data } = updated;
+    const { data: res, error } = await supabase.from('restaurants').update(data).eq('id', id).select().single();
+    return res as Restaurant;
 };
 
-export const deleteRestaurant = async (restaurantId: string): Promise<boolean> => {
-    restaurants = restaurants.filter(r => r.id !== restaurantId);
-    users = users.map(u => {
-        if (u.linkedRestaurantIds?.includes(restaurantId)) {
-            return { ...u, linkedRestaurantIds: u.linkedRestaurantIds.filter(id => id !== restaurantId) };
-        }
-        return u;
-    });
-    return simulateDelay(true);
+export const deleteRestaurant = async (restaurantId: string) => {
+    const { error } = await supabase.from('restaurants').delete().eq('id', restaurantId);
+    return !error;
 };
 
-export const updateUser = async (updated: User): Promise<User | null> => {
-    users = users.map(u => u.id === updated.id ? updated : u);
-    return simulateDelay(updated);
+export const updateUser = async (updated: User) => {
+    const { id, ...data } = updated;
+    // Don't send password to public table
+    const { password, ...safeData } = data as any; 
+    const { data: res, error } = await supabase.from('users').update(safeData).eq('id', id).select().single();
+    return res as User;
 };
 
-export const deleteUser = async (userId: string): Promise<boolean> => {
-    users = users.filter(u => u.id !== userId);
-    return simulateDelay(true);
+export const deleteUser = async (userId: string) => {
+    // Note: This deletes the public profile. To delete the Auth user, you need Admin API keys.
+    const { error } = await supabase.from('users').delete().eq('id', userId);
+    return !error;
 };
 
-export const createRestaurantAdmin = async (name: string, username: string, password: string, restaurantId: string, vendorId?: string): Promise<User | null> => {
+export const createRestaurantAdmin = async (name: string, username: string, password: string, restaurantId: string, vendorId?: string) => {
+    const email = toEmail(username);
+    const { data: authData, error: authError } = await supabase.auth.signUp({ email, password });
+    
+    if (authError || !authData.user) return null;
+
     const defaultPermissions: RestaurantPermissions = { canViewAnalytics: true, canManageMenu: true, canManageSettings: true, canManageOrders: true };
-    const newAdmin: User = {
-        id: `u${Date.now()}`, name, username, password, role: UserRole.RestaurantAdmin, 
-        vendorId: vendorId, restaurantId: restaurantId, permissions: defaultPermissions
+    const newUser = {
+        id: authData.user.id,
+        name, username, role: UserRole.RestaurantAdmin,
+        vendorId, restaurantId, permissions: defaultPermissions
     };
-    users.push(newAdmin);
-    return simulateDelay(newAdmin);
+    
+    const { data, error } = await supabase.from('users').insert(newUser).select().single();
+    return data as User;
 };
 
-export const createOrder = async (orderData: { restaurantId: string, items: CartItem[], subtotal: number, taxes: number, deliveryFee: number, total: number }): Promise<Order | null> => {
+export const createOrder = async (orderData: { restaurantId: string, items: CartItem[], subtotal: number, taxes: number, deliveryFee: number, total: number }) => {
+    const items = orderData.items.map(({ cartItemId, ...rest }) => rest);
     const now = new Date();
     
-    // Strip the transient cartItemId from each item before saving
-    const orderItems: OrderItem[] = orderData.items.map(({ cartItemId, ...rest }) => rest);
-
-    const newOrder: Order = {
-        id: `ORD-${Date.now()}`,
-        restaurantId: orderData.restaurantId,
-        items: orderItems,
-        subtotal: orderData.subtotal,
-        taxes: orderData.taxes,
-        deliveryFee: orderData.deliveryFee,
-        total: orderData.total,
+    const newOrder = {
+        ...orderData,
+        items,
         status: 'pending',
-        orderTime: now,
-        lastUpdateTime: now,
+        orderTime: now.toISOString(),
+        lastUpdateTime: now.toISOString()
     };
-    orders.unshift(newOrder);
-    return simulateDelay(newOrder);
-};
-
-export const updateOrderStatus = async (orderId: string, status: string, reason?: string, userId?: string): Promise<Order | null> => {
-    let updatedOrder: Order | null = null;
-    orders = orders.map(o => {
-        if (o.id === orderId) {
-            const updateData: any = { status, lastUpdateTime: new Date() };
-            if (reason) updateData.rejectionReason = reason;
-            if (userId) updateData.processedByUserId = userId;
-            if (status === 'completed') {
-                const completionMinutes = (new Date().getTime() - o.orderTime.getTime()) / 60000;
-                updateData.completionTime = Math.round(completionMinutes);
-            }
-            updatedOrder = { ...o, ...updateData };
-            return updatedOrder;
-        }
-        return o;
-    });
-    return simulateDelay(updatedOrder);
-};
-
-// Generic Template Handlers
-const createTemplate = async <T>(collection: T[], data: Omit<T, 'id'>, prefix: string): Promise<T | null> => {
-    const newTemplate = { ...data, id: `${prefix}-${Date.now()}` } as unknown as T;
-    collection.push(newTemplate);
-    return simulateDelay(newTemplate);
-};
-
-const updateTemplate = async <T extends {id: any}>(collection: T[], template: T): Promise<T | null> => {
-    const index = collection.findIndex(t => t.id === template.id);
-    if (index > -1) {
-        collection[index] = template;
+    
+    const { data, error } = await supabase.from('orders').insert(newOrder).select().single();
+    if(data) {
+        data.orderTime = new Date(data.orderTime);
+        data.lastUpdateTime = new Date(data.lastUpdateTime);
     }
-    return simulateDelay(template);
+    return data as Order;
 };
 
-const deleteTemplate = async (templateId: string): Promise<boolean> => {
-    return simulateDelay(true); // Simulate success, logic is handled in specific funcs
-};
-
-// Board Templates
-export const createBoardTemplate = (data: Omit<BoardTemplate, 'id'>) => createTemplate(boardTemplates, data, 'bt');
-export const updateBoardTemplate = (template: BoardTemplate) => updateTemplate(boardTemplates, template);
-export const deleteBoardTemplate = async (templateId: string) => {
-    const success = await deleteTemplate(templateId);
-    if (success) {
-        boardTemplates = boardTemplates.filter(t => t.id !== templateId);
-        restaurants = restaurants.map(r => r.boardTemplateId === templateId ? { ...r, boardTemplateId: undefined } : r);
+export const updateOrderStatus = async (orderId: string, status: string, reason?: string, userId?: string) => {
+    const updates: any = { status, lastUpdateTime: new Date().toISOString() };
+    if (reason) updates.rejectionReason = reason;
+    if (userId) updates.processedByUserId = userId;
+    
+    const { data, error } = await supabase.from('orders').update(updates).eq('id', orderId).select().single();
+    if(data) {
+        data.orderTime = new Date(data.orderTime);
+        data.lastUpdateTime = new Date(data.lastUpdateTime);
     }
-    return success;
+    return data as Order;
 };
 
-// Menu Item Templates
-export const createMenuItemTemplate = (data: Omit<MenuItemTemplate, 'id'>) => createTemplate(menuItemTemplates, data, 'mit');
-export const updateMenuItemTemplate = (item: MenuItemTemplate) => updateTemplate(menuItemTemplates, item);
-export const deleteMenuItemTemplate = async (itemId: string): Promise<boolean> => {
-    const success = await deleteTemplate(itemId);
-    if(success) {
-        menuItemTemplates = menuItemTemplates.filter(i => i.id !== itemId);
-        menuTemplates = menuTemplates.map(menu => ({
-            ...menu,
-            sections: menu.sections.map(section => ({
-                ...section,
-                itemIds: section.itemIds.filter(id => id !== itemId)
-            }))
-        }));
-    }
-    return success;
-};
+// --- Templates ---
+const createTmpl = async (col: string, data: any) => {
+    const { data: res } = await supabase.from(col).insert(data).select().single();
+    return res;
+}
+const updateTmpl = async (col: string, data: any) => {
+    const { id, ...rest } = data;
+    const { data: res } = await supabase.from(col).update(rest).eq('id', id).select().single();
+    return res;
+}
+const deleteTmpl = async (col: string, id: string) => {
+    const { error } = await supabase.from(col).delete().eq('id', id);
+    return !error;
+}
 
-// Menu Templates
-export const createMenuTemplate = (data: Omit<MenuTemplate, 'id'>) => createTemplate(menuTemplates, data, 'mt');
-export const updateMenuTemplate = (template: MenuTemplate) => updateTemplate(menuTemplates, template);
-export const deleteMenuTemplate = async (templateId: string) => {
-    const success = await deleteTemplate(templateId);
-    if (success) {
-        menuTemplates = menuTemplates.filter(t => t.id !== templateId);
-        restaurants = restaurants.map(r => ({
-            ...r,
-            assignedMenuTemplateIds: r.assignedMenuTemplateIds?.filter(id => id !== templateId)
-        }));
-    }
-    return success;
-};
+export const createBoardTemplate = (d: any) => createTmpl('boardTemplates', d);
+export const updateBoardTemplate = (d: any) => updateTmpl('boardTemplates', d);
+export const deleteBoardTemplate = (id: string) => deleteTmpl('boardTemplates', id);
+
+export const createMenuTemplate = (d: any) => createTmpl('menuTemplates', d);
+export const updateMenuTemplate = (d: any) => updateTmpl('menuTemplates', d);
+export const deleteMenuTemplate = (id: string) => deleteTmpl('menuTemplates', id);
+
+export const createMenuItemTemplate = (d: any) => createTmpl('menuItemTemplates', d);
+export const updateMenuItemTemplate = (d: any) => updateTmpl('menuItemTemplates', d);
+export const deleteMenuItemTemplate = (id: string) => deleteTmpl('menuItemTemplates', id);

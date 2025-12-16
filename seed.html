@@ -1,82 +1,240 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>FlowApp Database Seeder</title>
+    <title>FlowApp Database Seeder (Standalone)</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script type="importmap">
-    {
-      "imports": {
-        "firebase/": "https://aistudiocdn.com/firebase@^12.5.0/"
-      }
-    }
-    </script>
+    <!-- Use CDN for Supabase to ensure it works without a bundler -->
 </head>
 <body class="bg-gray-100 flex items-center justify-center h-screen font-sans">
     <div class="text-center bg-white p-8 rounded-lg shadow-lg w-full max-w-lg">
-        <h1 class="text-2xl font-bold mb-4 text-slate-800">FlowApp Database Seeder</h1>
-        <p class="mb-6 text-gray-600">
-            This tool will populate your Firestore database with the initial mock data.
-            <br>
-            <strong class="text-red-600">Warning:</strong> This is a destructive action that will delete all data in the collections before seeding.
-        </p>
-        <button id="seedButton" class="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg transition-colors w-full disabled:bg-red-400">
+        <h1 class="text-2xl font-bold mb-4 text-emerald-600">FlowApp Seeder (Standalone)</h1>
+        
+        <div class="mb-4 text-sm text-left bg-red-50 p-4 rounded border border-red-200">
+            <p class="font-bold text-red-700">⚠️ IMPORTANT REQUIREMENTS</p>
+            <ul className="list-disc list-inside mt-2 text-gray-700 space-y-1">
+                <li><strong>DISABLE</strong> Row Level Security (RLS) on your Supabase tables.</li>
+                <li><strong>ENABLE</strong> the "Email" Provider in Supabase Auth settings.</li>
+                <li><strong>DISABLE</strong> "Confirm Email" in Supabase Auth settings.</li>
+            </ul>
+        </div>
+
+        <button id="seedButton" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition-colors w-full disabled:bg-emerald-400 disabled:cursor-not-allowed">
             Seed Database
         </button>
-        <div class="mt-4 text-left bg-slate-800 text-white p-4 rounded-lg h-80 overflow-y-auto text-sm font-mono">
-            <pre id="output" class="whitespace-pre-wrap"></pre>
+        <div class="mt-4 text-left bg-slate-800 text-white p-4 rounded-lg h-64 overflow-y-auto text-xs font-mono">
+            <pre id="output" class="whitespace-pre-wrap">Ready.</pre>
         </div>
     </div>
 
     <script type="module">
-        // This script now directly imports the seedDatabase function, 
-        // which will use the updated firebaseConfig.ts for its connection.
-        import { seedDatabase } from './services/seedDatabase.ts';
+        import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+        // CONFIGURATION
+        const SUPABASE_URL = 'https://ugtjuwkrsvoiaxygucab.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVndGp1d2tyc3ZvaWF4eWd1Y2FiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU5MDM5MjgsImV4cCI6MjA4MTQ3OTkyOH0.pI7RYK8GPQrFy-9ju3CI0dfcgVkmel8dQL5udVndh5M';
+
+        const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        // DATA CONSTANTS (Inlined to avoid Import issues)
+        const VENDORS = [
+            { id: '1', name: 'Burger Queen Group' },
+            { id: '2', name: 'Pizza Palace Inc.' },
+        ];
+
+        const USERS = [
+            { id: '2', name: 'Burger Queen Admin', username: 'vendor1', password: 'password', role: 'Vendor', vendorId: '1' },
+            { id: '3', name: 'Pizza Palace Admin', username: 'vendor2', password: 'password', role: 'Vendor', vendorId: '2' },
+            { id: '4', name: 'Super Admin', username: 'superadmin', password: 'password', role: 'SuperAdmin' },
+            { id: '5', name: 'Burger Restaurant Manager', username: 'restadmin1', password: 'password', role: 'RestaurantAdmin', vendorId: '1', restaurantId: '1', permissions: { canViewAnalytics: true, canManageMenu: true, canManageSettings: false, canManageOrders: true }, permissionSchedule: { monday: { isActive: true, startTime: '00:00', endTime: '23:59' }, tuesday: { isActive: true, startTime: '00:00', endTime: '23:59' }, wednesday: { isActive: true, startTime: '00:00', endTime: '23:59' }, thursday: { isActive: true, startTime: '00:00', endTime: '23:59' }, friday: { isActive: true, startTime: '00:00', endTime: '23:59' }, saturday: { isActive: true, startTime: '00:00', endTime: '23:59' }, sunday: { isActive: true, startTime: '00:00', endTime: '23:59' } } },
+        ];
+
+        const RESTAURANTS = [
+          {
+            id: '1', vendorId: '1', name: 'Burger Queen',
+            description: 'Home of the Flame-Grilled Masterpiece. We serve the juiciest burgers in town.',
+            bannerUrl: 'https://picsum.photos/1200/400?random=1',
+            contact: { phone: '555-1234', email: 'contact@burgerqueen.com', address: '123 Burger Lane, Foodville' },
+            openingHours: { monday: { isOpen: true, open: '11:00', close: '22:00' }, tuesday: { isOpen: true, open: '11:00', close: '22:00' }, wednesday: { isOpen: true, open: '11:00', close: '22:00' }, thursday: { isOpen: true, open: '11:00', close: '22:00' }, friday: { isOpen: true, open: '11:00', close: '23:00' }, saturday: { isOpen: true, open: '11:00', close: '23:00' }, sunday: { isOpen: false, open: '11:00', close: '22:00' } },
+            paymentMethods: ['Credit Card', 'Cash', 'Stripe'],
+            branding: { primaryColor: '#D97706', logoUrl: 'https://picsum.photos/200/200?random=11' },
+            media: [ { id: '1', type: 'video', title: 'How We Make Our Famous Burgers', source: 'https://www.w3schools.com/html/mov_bbb.mp4', description: 'A quick look behind the scenes at Burger Queen.' }, { id: '2', type: 'text', title: 'Employee of the Month!', source: 'Congrats to Sarah J. for her amazing work this month!', description: 'Celebrating our amazing team.' } ],
+            boardTemplateId: '1',
+            assignedMenuTemplateIds: ['1'],
+          },
+          {
+            id: '2', vendorId: '2', name: 'Pizza Palace',
+            description: 'Authentic Italian pizza with the freshest ingredients. A slice of heaven!',
+            bannerUrl: 'https://picsum.photos/1200/400?random=2',
+            contact: { phone: '555-5678', email: 'ciao@pizzapalace.com', address: '456 Pizza Plaza, Foodville' },
+            openingHours: { monday: { isOpen: false, open: '12:00', close: '23:00' }, tuesday: { isOpen: true, open: '12:00', close: '23:00' }, wednesday: { isOpen: true, open: '12:00', close: '23:00' }, thursday: { isOpen: true, open: '12:00', close: '23:00' }, friday: { isOpen: true, open: '12:00', close: '00:00' }, saturday: { isOpen: true, open: '12:00', close: '00:00' }, sunday: { isOpen: true, open: '12:00', close: '23:00' } },
+            paymentMethods: ['Credit Card', 'PayPal', 'Bizum', 'Cash'],
+            branding: { primaryColor: '#DC2626', logoUrl: 'https://picsum.photos/200/200?random=12' },
+            media: [ { id: '3', type: 'audio', title: 'Message from the Chef', source: 'https://www.w3schools.com/html/horse.ogg', description: 'Listen to Chef Giovanni talk about his passion for pizza.' }, { id: '4', type: 'link', title: 'Catering Services', source: '#', description: 'Planning a party? Click to learn more.' } ],
+            boardTemplateId: '2',
+            assignedMenuTemplateIds: ['2'],
+          },
+        ];
+
+        const BOARD_TEMPLATES = [
+            { id: '1', vendorId: '1', name: 'Standard Burger Workflow', config: { statuses: [ { id: 'pending', label: 'Pending', color: '#fb923c' }, { id: 'accepted', label: 'Accepted', color: '#3b82f6' }, { id: 'in-progress', label: 'In Progress', color: '#a855f7' }, { id: 'ready-for-pickup', label: 'Ready for Pickup', color: '#facc15' }, { id: 'completed', label: 'Completed', color: '#22c55e' }, { id: 'rejected', label: 'Rejected', color: '#ef4444' } ], columns: [ { id: 'col-1', title: 'New Orders', statusIds: ['pending'], icon: 'ClipboardListIcon', titleColor: '#374151', columnColor: '#F3F4F6' }, { id: 'col-2', title: 'In Progress', statusIds: ['accepted', 'in-progress'], icon: 'ChefHatIcon', titleColor: '#374151', columnColor: '#F3F4F6' }, { id: 'col-3', title: 'Ready for Pickup', statusIds: ['ready-for-pickup'], icon: 'ShoppingBagIcon', titleColor: '#374151', columnColor: '#F3F4F6' } ], rejectionReasons: [ { id: 'reason-1', message: 'Restaurant is too busy to accept new orders.' }, { id: 'reason-2', message: 'One or more items are out of stock.' }, { id: 'reason-3', message: 'Closing soon and cannot fulfill the order in time.' } ], statusTransitions: { 'pending': ['accepted', 'rejected'], 'accepted': ['in-progress'], 'in-progress': ['ready-for-pickup'], 'ready-for-pickup': ['completed'], 'completed': [], 'rejected': [] } } },
+            { id: '2', vendorId: '2', name: 'Standard Pizza Workflow', config: { statuses: [ { id: 'pending', label: 'Pending', color: '#fb923c' }, { id: 'accepted', label: 'Accepted', color: '#3b82f6' }, { id: 'in-progress', label: 'In Progress', color: '#a855f7' }, { id: 'ready-for-pickup', label: 'Ready for Pickup', color: '#facc15' }, { id: 'completed', label: 'Completed', color: '#22c55e' }, { id: 'rejected', label: 'Rejected', color: '#ef4444' } ], columns: [ { id: 'col-1', title: 'New Orders', statusIds: ['pending'], icon: 'ClipboardListIcon', titleColor: '#374151', columnColor: '#F3F4F6' }, { id: 'col-2', title: 'In Progress', statusIds: ['accepted', 'in-progress'], icon: 'ChefHatIcon', titleColor: '#374151', columnColor: '#F3F4F6' }, { id: 'col-3', title: 'Ready for Pickup', statusIds: ['ready-for-pickup'], icon: 'ShoppingBagIcon', titleColor: '#374151', columnColor: '#F3F4F6' } ], rejectionReasons: [ { id: 'reason-1', message: 'Restaurant is too busy to accept new orders.' }, { id: 'reason-2', message: 'One or more items are out of stock.' }, { id: 'reason-3', message: 'Closing soon and cannot fulfill the order in time.' } ], statusTransitions: { 'pending': ['accepted', 'rejected'], 'accepted': ['in-progress'], 'in-progress': ['ready-for-pickup'], 'ready-for-pickup': ['completed'], 'completed': [], 'rejected': [] } } }
+        ];
+
+        const MENU_ITEM_TEMPLATES = [
+            { id: '101', vendorId: '1', name: 'Classic Cheeseburger', description: 'A timeless classic.', price: 8.99, imageUrl: 'https://picsum.photos/400/300?random=21', composition: ['Beef Patty', 'Cheddar'], intolerances: [{ id: 'lactose', name: 'Lactose' }] },
+            { id: '102', vendorId: '1', name: 'Bacon Deluxe', description: 'Classic burger with bacon.', price: 10.99, imageUrl: 'https://picsum.photos/400/300?random=22', composition: ['Beef Patty', 'Bacon', 'Cheddar'], discount: { percentage: 10, showToConsumer: true } },
+            { id: '103', vendorId: '1', name: 'Spicy Jalapeño Burger', description: 'Hot and spicy.', price: 9.99, imageUrl: 'https://picsum.photos/400/300?random=23', composition: ['Beef Patty', 'Jalapeños'], allergens: [{ id: 's', name: 'Spicy' }] },
+            { id: '104', vendorId: '1', name: 'Crispy Fries', description: 'Golden fries.', price: 3.50, imageUrl: 'https://picsum.photos/400/300?random=24', composition: ['Potatoes'], allergens: [{ id: 'gf', name: 'Gluten-Free' }] },
+            { id: '201', vendorId: '2', name: 'Margherita Pizza', description: 'Classic cheese pizza.', price: 14.00, imageUrl: 'https://picsum.photos/400/300?random=31', composition: ['Mozzarella', 'Tomato Sauce'], allergens: [{ id: 'v', name: 'Vegetarian' }] },
+            { id: '202', vendorId: '2', name: 'Pepperoni Passion', description: 'Spicy pepperoni.', price: 16.50, imageUrl: 'https://picsum.photos/400/300?random=32', composition: ['Pepperoni', 'Mozzarella'] },
+            { id: '203', vendorId: '2', name: 'Veggie Supreme', description: 'Garden vegetables.', price: 15.50, imageUrl: 'https://picsum.photos/400/300?random=33', composition: ['Veggies', 'Mozzarella'] },
+            { id: '204', vendorId: '2', name: 'Garlic Knots', description: 'Buttery knots.', price: 5.00, imageUrl: 'https://picsum.photos/400/300?random=34', composition: ['Dough', 'Garlic'], allergens: [{ id: 'v', name: 'Vegetarian' }] },
+        ];
+
+        const MENU_TEMPLATES = [
+            { id: '1', vendorId: '1', name: 'Main Menu (Burgers)', sections: [ { id: 'sec-1-1', title: 'Signature Burgers', itemIds: ['101', '102', '103'] }, { id: 'sec-1-2', title: 'Sides', itemIds: ['104'] } ] },
+            { id: '2', vendorId: '2', name: 'Main Menu (Pizza)', sections: [ { id: 'sec-2-1', title: 'Pizzas', itemIds: ['201', '202', '203'] }, { id: 'sec-2-2', title: 'Starters', itemIds: ['204'] } ] },
+        ];
+
 
         const seedButton = document.getElementById('seedButton');
         const output = document.getElementById('output');
+        const toEmail = (username) => `${username.toLowerCase().replace(/\s/g, '')}@flowapp.test`;
 
-        function log(message) {
+        function log(message, isError = false) {
             console.log(message);
             if (output) {
-                output.textContent += message + '\n';
+                const line = document.createElement('div');
+                line.textContent = message;
+                if (isError) line.style.color = '#FCA5A5'; // Light Red
+                output.appendChild(line);
                 output.scrollTop = output.scrollHeight;
             }
         }
 
-        if (seedButton) {
-            seedButton.addEventListener('click', async () => {
-                if (!confirm("Are you sure you want to delete all existing data and seed the database? This cannot be undone.")) {
-                    return;
+        async function runSeed() {
+            log('Starting seed process...');
+            
+            // 1. Clear Tables
+            const tables = ['orders', 'users', 'restaurants', 'vendors', 'boardTemplates', 'menuTemplates', 'menuItemTemplates'];
+            for (const t of tables) {
+                const { error } = await supabase.from(t).delete().neq('id', '00000000-0000-0000-0000-000000000000');
+                if (error) {
+                    if (error.code === '42501') {
+                         log(`[ERROR] PERMISSION DENIED deleting ${t}. RLS is likely enabled. Please disable RLS in Supabase Dashboard.`, true);
+                         return; // Stop execution
+                    } else if (error.code !== 'PGRST116') {
+                        log(`[WARN] Error deleting ${t}: ${error.message}`, true);
+                    }
+                }
+            }
+            log('Tables cleared.');
+
+            const idMap = {};
+
+            // 2. Vendors
+            for (const v of VENDORS) {
+                const { data, error } = await supabase.from('vendors').insert({ name: v.name }).select().single();
+                if (error) { log(`[ERROR] Vendor ${v.name}: ${error.message}`, true); return; }
+                idMap[`vendor_${v.id}`] = data.id;
+                log(`✓ Created Vendor: ${v.name}`);
+            }
+
+            // 3. Templates
+             for (const t of BOARD_TEMPLATES) {
+                const newVendorId = idMap[`vendor_${t.vendorId}`];
+                const { data } = await supabase.from('boardTemplates').insert({ ...t, id: undefined, vendorId: newVendorId }).select().single();
+                if (data) idMap[`board_${t.id}`] = data.id;
+            }
+            for (const t of MENU_ITEM_TEMPLATES) {
+                const newVendorId = idMap[`vendor_${t.vendorId}`];
+                const { data } = await supabase.from('menuItemTemplates').insert({ ...t, id: undefined, vendorId: newVendorId }).select().single();
+                if (data) idMap[`item_${t.id}`] = data.id;
+            }
+            for (const t of MENU_TEMPLATES) {
+                const newVendorId = idMap[`vendor_${t.vendorId}`];
+                const newSections = t.sections.map(sec => ({...sec, itemIds: sec.itemIds.map(oldId => idMap[`item_${oldId}`] || oldId)}));
+                const { data } = await supabase.from('menuTemplates').insert({ ...t, id: undefined, vendorId: newVendorId, sections: newSections }).select().single();
+                if (data) idMap[`menu_${t.id}`] = data.id;
+            }
+            log('✓ Templates Created');
+
+            // 4. Restaurants
+            for (const r of RESTAURANTS) {
+                const newVendorId = idMap[`vendor_${r.vendorId}`];
+                const newBoardId = r.boardTemplateId ? idMap[`board_${r.boardTemplateId}`] : null;
+                const newMenuIds = r.assignedMenuTemplateIds?.map(old => idMap[`menu_${old}`]).filter(Boolean);
+
+                const { data, error } = await supabase.from('restaurants').insert({
+                    ...r, id: undefined, vendorId: newVendorId, boardTemplateId: newBoardId, assignedMenuTemplateIds: newMenuIds
+                }).select().single();
+                
+                if (error) { log(`[ERROR] Restaurant ${r.name}: ${error.message}`, true); continue; }
+                idMap[`restaurant_${r.id}`] = data.id;
+                log(`✓ Created Restaurant: ${r.name}`);
+            }
+
+            // 5. Users
+            for (const u of USERS) {
+                const email = toEmail(u.username);
+                const password = u.password || 'password';
+                
+                let user = null;
+
+                // A. Try SignUp
+                let { data: authData, error: authError } = await supabase.auth.signUp({ email, password });
+                
+                if (authData.user) {
+                    user = authData.user;
+                } else if (authError && authError.message.toLowerCase().includes('registered')) {
+                     // B. If registered, try SignIn to get the ID
+                     log(`User ${u.username} exists, signing in...`);
+                     const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+                     if (signInData.user) {
+                         user = signInData.user;
+                     } else {
+                         log(`[ERROR] Could not sign in as existing user ${u.username}: ${signInError?.message}`, true);
+                     }
+                } else {
+                     log(`[ERROR] Auth SignUp failed for ${u.username}: ${authError?.message}`, true);
                 }
 
-                seedButton.disabled = true;
-                seedButton.textContent = 'Seeding...';
-                output.textContent = '';
-
-                try {
-                    log('Starting database seed... Please wait.');
-                    const result = await seedDatabase();
-                    log('--------------------');
-                    log(result);
-                } catch (error) {
-                    log('\n--- AN ERROR OCCURRED ---');
-                    log('Please check the developer console for more details.');
-                    log('Common issues:');
-                    log('- Make sure you have pasted your credentials into firebaseConfig.ts.');
-                    log('- Ensure your Firestore security rules are set to test mode to allow writes.');
-                    log(error.message);
-                    console.error(error);
-                } finally {
-                    seedButton.disabled = false;
-                    seedButton.textContent = 'Seed Database';
+                // C. If we have a user object (from either sign up or sign in), insert profile
+                if (user) {
+                    const newVendorId = u.vendorId ? idMap[`vendor_${u.vendorId}`] : null;
+                    const newRestId = u.restaurantId ? idMap[`restaurant_${u.restaurantId}`] : null;
+                    const { error } = await supabase.from('users').upsert({
+                        id: user.id,
+                        name: u.name,
+                        username: u.username,
+                        role: u.role,
+                        vendorId: newVendorId,
+                        restaurantId: newRestId,
+                        permissions: u.permissions,
+                        permissionSchedule: u.permissionSchedule
+                    });
+                    if (error) log(`[ERROR] Profile ${u.username}: ${error.message}. (Check RLS policies)`, true);
+                    else log(`✓ Seeded User Profile: ${u.username}`);
                 }
-            });
+            }
+
+            log('--------------------------');
+            log('SEEDING COMPLETE! You can now log in.');
         }
 
-        log('Ready to seed.');
-        log('Please ensure you have updated firebaseConfig.ts with your credentials from the Firebase console.');
-
+        if (seedButton) {
+            seedButton.addEventListener('click', async () => {
+                if(!confirm("Are you sure? This deletes existing data.")) return;
+                seedButton.disabled = true;
+                seedButton.innerText = "Seeding...";
+                output.innerText = "";
+                await runSeed();
+                seedButton.disabled = false;
+                seedButton.innerText = "Seed Database";
+            });
+        }
     </script>
 </body>
 </html>

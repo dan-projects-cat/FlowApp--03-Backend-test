@@ -1,7 +1,4 @@
 
-
-
-
 import { User, UserRole, Vendor, Restaurant, Allergen, Order, MediaType, PaymentMethod, BoardTemplate, MenuItemTemplate, MenuTemplate, Intolerance } from './types';
 
 // NOTE: The default consumer user has been removed. Consumers will now be handled as "guests".
@@ -173,7 +170,8 @@ export const RESTAURANTS: Restaurant[] = [
     branding: { primaryColor: '#D97706', logoUrl: 'https://picsum.photos/200/200?random=11' },
     media: [
       { id: '1', type: MediaType.Video, title: 'How We Make Our Famous Burgers', source: 'https://www.w3schools.com/html/mov_bbb.mp4', description: 'A quick look behind the scenes at Burger Queen.' },
-      { id: '2', type: MediaType.Text, title: 'Employee of the Month!', source: 'Congrats to Sarah J. for her amazing work this month!', description: 'Celebrating our amazing team.' },
+      { id: '2', type: MediaType.Video, title: 'Summer Special Commercial', source: 'https://media.w3.org/2010/05/sintel/trailer_400p.mp4', description: 'Check out our new summer lineup!' },
+      { id: '3', type: MediaType.Text, title: 'Employee of the Month!', source: 'Congrats to Sarah J. for her amazing work this month!', description: 'Celebrating our amazing team.' },
     ],
     boardTemplateId: '1',
     assignedMenuTemplateIds: ['1'],
@@ -197,8 +195,9 @@ export const RESTAURANTS: Restaurant[] = [
     paymentMethods: [PaymentMethod.CreditCard, PaymentMethod.PayPal, PaymentMethod.Bizum, PaymentMethod.Cash],
     branding: { primaryColor: '#DC2626', logoUrl: 'https://picsum.photos/200/200?random=12' },
     media: [
-       { id: '3', type: MediaType.Audio, title: 'Message from the Chef', source: 'https://www.w3schools.com/html/horse.ogg', description: 'Listen to Chef Giovanni talk about his passion for pizza.' },
-       { id: '4', type: MediaType.Link, title: 'Catering Services', source: '#', description: 'Planning a party? Click to learn more.' },
+       { id: '4', type: MediaType.Video, title: 'Hand-Tossing Dough', source: 'https://www.w3schools.com/html/mov_bbb.mp4', description: 'See how our masters do it.' },
+       { id: '5', type: MediaType.Audio, title: 'Message from the Chef', source: 'https://www.w3schools.com/html/horse.ogg', description: 'Listen to Chef Giovanni talk about his passion for pizza.' },
+       { id: '6', type: MediaType.Link, title: 'Catering Services', source: '#', description: 'Planning a party? Click to learn more.' },
     ],
     boardTemplateId: '2',
     assignedMenuTemplateIds: ['2'],

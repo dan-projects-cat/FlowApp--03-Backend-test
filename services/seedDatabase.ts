@@ -1,99 +1,136 @@
 
-import { collection, writeBatch, doc, getDocs, Timestamp } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
-import { USERS, VENDORS, RESTAURANTS, ORDERS, BOARD_TEMPLATES, MENU_TEMPLATES, MENU_ITEM_TEMPLATES } from '../data';
+import { supabase } from '../supabaseClient';
+import { USERS, VENDORS, RESTAURANTS, BOARD_TEMPLATES, MENU_TEMPLATES, MENU_ITEM_TEMPLATES } from '../data';
+import { UserRole } from '../types';
 
-const COLLECTIONS = [
-    'users',
-    'vendors',
-    'restaurants',
-    'orders',
-    'boardTemplates',
-    'menuTemplates',
-    'menuItemTemplates'
-];
+const toEmail = (username: string) => `${username.toLowerCase().replace(/\s/g, '')}@flowapp.test`;
 
-/**
- * A one-time script to seed the Firestore database with mock data.
- * WARNING: This is a destructive operation. It will delete all existing data
- * in the specified collections before seeding.
- */
 export const seedDatabase = async (): Promise<string> => {
-    console.log('Starting database seed...');
-    const batch = writeBatch(db);
+    let log = "Starting Supabase seed...\n";
 
-    // 1. Clear all existing data in collections
-    console.log('Clearing existing data...');
-    for (const collectionName of COLLECTIONS) {
-        const querySnapshot = await getDocs(collection(db, collectionName));
-        querySnapshot.forEach((doc) => {
-            batch.delete(doc.ref);
-        });
-        console.log(`Marked ${querySnapshot.size} documents for deletion from ${collectionName}.`);
+    // 1. CLEAR TABLES
+    const tables = [
+        'orders', 
+        'users', 
+        'restaurants', 
+        'boardTemplates', 
+        'menuTemplates', 
+        'menuItemTemplates', 
+        'vendors' 
+    ];
+
+    for (const t of tables) {
+        const { error } = await supabase.from(t).delete().neq('id', '00000000-0000-0000-0000-000000000000'); 
+        if (error) {
+            if (error.code !== 'PGRST116') {
+                 // Common RLS error code is 42501. We proceed anyway, assuming we might just need to insert.
+                 log += `[WARN] Error clearing ${t}: ${error.message} (Code: ${error.code}). Proceeding...\n`;
+            }
+        }
     }
-    // Commit the deletions first to avoid any potential conflicts
-    await batch.commit();
-    console.log('Existing data cleared.');
+    log += "Tables clear attempt finished.\n";
 
-    // 2. Start a new batch for seeding
-    const seedBatch = writeBatch(db);
+    const idMap: Record<string, string> = {};
 
-    // Seed Vendors
-    VENDORS.forEach(vendor => {
-        const docRef = doc(db, 'vendors', vendor.id);
-        seedBatch.set(docRef, vendor);
-    });
-    console.log(`Seeding ${VENDORS.length} vendors...`);
+    // 2. VENDORS
+    for (const v of VENDORS) {
+        const { data, error } = await supabase.from('vendors').insert({ name: v.name }).select().single();
+        if (data) {
+            idMap[`vendor_${v.id}`] = data.id;
+            log += `Created Vendor: ${v.name}\n`;
+        } else {
+            log += `Failed Vendor ${v.name}: ${error?.message || 'Unknown Error'}\n`;
+        }
+    }
 
-    // Seed Users
-    USERS.forEach(user => {
-        const docRef = doc(db, 'users', user.id);
-        seedBatch.set(docRef, user);
-    });
-    console.log(`Seeding ${USERS.length} users...`);
+    // 3. TEMPLATES
+    for (const t of BOARD_TEMPLATES) {
+        const newVendorId = idMap[`vendor_${t.vendorId}`];
+        if (!newVendorId) continue;
+        const { data } = await supabase.from('boardTemplates').insert({ ...t, id: undefined, vendorId: newVendorId }).select().single();
+        if (data) idMap[`board_${t.id}`] = data.id;
+    }
+    for (const t of MENU_ITEM_TEMPLATES) {
+        const newVendorId = idMap[`vendor_${t.vendorId}`];
+        if (!newVendorId) continue;
+        const { data } = await supabase.from('menuItemTemplates').insert({ ...t, id: undefined, vendorId: newVendorId }).select().single();
+        if (data) idMap[`item_${t.id}`] = data.id;
+    }
+    for (const t of MENU_TEMPLATES) {
+        const newVendorId = idMap[`vendor_${t.vendorId}`];
+        if (!newVendorId) continue;
+        const newSections = t.sections.map(sec => ({
+            ...sec,
+            itemIds: sec.itemIds.map(oldId => idMap[`item_${oldId}`] || oldId)
+        }));
 
-    // Seed Restaurants
-    RESTAURANTS.forEach(restaurant => {
-        const docRef = doc(db, 'restaurants', restaurant.id);
-        seedBatch.set(docRef, restaurant);
-    });
-    console.log(`Seeding ${RESTAURANTS.length} restaurants...`);
-    
-    // Seed Board Templates
-    BOARD_TEMPLATES.forEach(template => {
-        const docRef = doc(db, 'boardTemplates', template.id);
-        seedBatch.set(docRef, template);
-    });
-    console.log(`Seeding ${BOARD_TEMPLATES.length} board templates...`);
+        const { data } = await supabase.from('menuTemplates').insert({ ...t, id: undefined, vendorId: newVendorId, sections: newSections }).select().single();
+        if (data) idMap[`menu_${t.id}`] = data.id;
+    }
 
-    // Seed Menu Item Templates
-    MENU_ITEM_TEMPLATES.forEach(item => {
-        const docRef = doc(db, 'menuItemTemplates', item.id);
-        seedBatch.set(docRef, item);
-    });
-    console.log(`Seeding ${MENU_ITEM_TEMPLATES.length} menu item templates...`);
+    // 4. RESTAURANTS
+    for (const r of RESTAURANTS) {
+        const newVendorId = idMap[`vendor_${r.vendorId}`];
+        const newBoardId = r.boardTemplateId ? idMap[`board_${r.boardTemplateId}`] : null;
+        const newMenuIds = r.assignedMenuTemplateIds?.map(old => idMap[`menu_${old}`]).filter(Boolean);
 
-    // Seed Menu Templates
-    MENU_TEMPLATES.forEach(template => {
-        const docRef = doc(db, 'menuTemplates', template.id);
-        seedBatch.set(docRef, template);
-    });
-    console.log(`Seeding ${MENU_TEMPLATES.length} menu templates...`);
+        const { data } = await supabase.from('restaurants').insert({
+            ...r,
+            id: undefined,
+            vendorId: newVendorId,
+            boardTemplateId: newBoardId,
+            assignedMenuTemplateIds: newMenuIds
+        }).select().single();
+        
+        if (data) {
+            idMap[`restaurant_${r.id}`] = data.id;
+            log += `Created Restaurant: ${r.name}\n`;
+        }
+    }
 
-    // Seed Orders (and convert Date objects to Firestore Timestamps)
-    ORDERS.forEach(order => {
-        const docRef = doc(db, 'orders', order.id);
-        const orderDataForFirestore = {
-            ...order,
-            orderTime: Timestamp.fromDate(new Date(order.orderTime)),
-            lastUpdateTime: Timestamp.fromDate(new Date(order.lastUpdateTime)),
-        };
-        seedBatch.set(docRef, orderDataForFirestore);
-    });
-    console.log(`Seeding ${ORDERS.length} orders...`);
+    // 5. USERS
+    for (const u of USERS) {
+        if (!u.username) continue;
+        const email = toEmail(u.username);
+        const password = u.password || 'password';
 
-    // 3. Commit the seed batch
-    await seedBatch.commit();
-    console.log('Database seeded successfully!');
-    return `Database seeded successfully with ${VENDORS.length} vendors, ${USERS.length} users, ${RESTAURANTS.length} restaurants, and ${ORDERS.length} orders.`;
+        // Try SignUp
+        let { data: authData, error: authError } = await supabase.auth.signUp({ email, password });
+        
+        // If user already exists, try to sign in to get their ID to repair the profile
+        if (authError && authError.message.toLowerCase().includes('registered')) {
+             const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+             if (signInData.user) {
+                 authData.user = signInData.user;
+                 log += `User ${u.username} exists. Signed in to update profile.\n`;
+             } else {
+                 log += `[ERROR] User ${u.username} exists but cannot sign in: ${signInError?.message}. (Is 'Confirm Email' enabled in Supabase? Is 'Email' provider enabled?)\n`;
+             }
+        } else if (authError) {
+             log += `[ERROR] Auth SignUp failed for ${u.username}: ${authError.message}\n`;
+        }
+
+        if (authData.user) {
+            const userId = authData.user.id;
+            
+            const newVendorId = u.vendorId ? idMap[`vendor_${u.vendorId}`] : null;
+            const newRestId = u.restaurantId ? idMap[`restaurant_${u.restaurantId}`] : null;
+            
+            const { error: profileError } = await supabase.from('users').upsert({
+                id: userId,
+                name: u.name,
+                username: u.username,
+                role: u.role,
+                vendorId: newVendorId,
+                restaurantId: newRestId,
+                permissions: u.permissions,
+                permissionSchedule: u.permissionSchedule
+            });
+            
+            if (!profileError) log += `✓ Seeded/Updated Profile: ${u.username}\n`;
+            else log += `[ERROR] Failed Profile ${u.username}: ${profileError.message} (Likely RLS blocking insert)\n`;
+        }
+    }
+
+    return log + "\nDone! Check logs for any Errors.";
 };

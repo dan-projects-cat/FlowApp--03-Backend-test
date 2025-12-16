@@ -1,6 +1,8 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { User, UserRole, Vendor, Restaurant, CartItem, NotificationMessage, View, Order, BoardTemplate, MenuTemplate, MenuItemTemplate } from './types';
-import * as api from './services/apiService'; // Use the new service layer
+import * as api from './services/apiService'; 
+import { supabase } from './supabaseClient';
 
 import Header from './components/Header';
 import HomePage from './components/HomePage';
@@ -40,7 +42,6 @@ const App: React.FC = () => {
 
     // --- DATA FETCHING ---
     const fetchData = useCallback(async () => {
-        setIsLoading(true);
         try {
             const [fetchedUsers, fetchedVendors, fetchedRestaurants, fetchedOrders, fetchedBoards, fetchedMenus, fetchedItems] = await Promise.all([
                 api.fetchUsers(),
@@ -60,15 +61,66 @@ const App: React.FC = () => {
             setMenuItemTemplates(fetchedItems);
         } catch (error) {
             console.error("Failed to fetch data", error);
-            addNotification("Could not load application data.", "error");
-        } finally {
-            setIsLoading(false);
+            addNotification("Could not load application data. Check your network.", "error");
         }
     }, [addNotification]);
 
     useEffect(() => {
-        fetchData();
+        setIsLoading(true);
+        
+        // Safety timeout to ensure we don't get stuck on "Loading..." forever
+        const safetyTimeout = setTimeout(() => {
+            setIsLoading(loading => {
+                if (loading) {
+                    console.warn("Data fetch timed out. Forcing app load.");
+                    addNotification("Data loading timed out. Some data may be missing.", "error");
+                    return false;
+                }
+                return loading;
+            });
+        }, 8000); // 8 seconds timeout
+
+        fetchData().finally(() => {
+            clearTimeout(safetyTimeout);
+            setIsLoading(false);
+        });
+
+        return () => clearTimeout(safetyTimeout);
     }, [fetchData]);
+
+    // --- AUTH STATE LISTENER (SUPABASE) ---
+    useEffect(() => {
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            if (session?.user) {
+                api.fetchUsers().then(allUsers => {
+                    const found = allUsers.find(u => u.id === session.user.id);
+                    if (found) setCurrentUser(found);
+                });
+            }
+        });
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+            if (session?.user) {
+                 const { data: userProfile } = await supabase.from('users').select('*').eq('id', session.user.id).single();
+                 if (userProfile) setCurrentUser(userProfile as User);
+            } else {
+                setCurrentUser(null);
+            }
+        });
+
+        return () => subscription.unsubscribe();
+    }, []);
+
+    // --- SIMULATED PUSH MESSAGES ---
+    useEffect(() => {
+        const marketingTimer = setTimeout(() => {
+            if (currentUser && restaurants.length > 0) {
+                const randomRest = restaurants[Math.floor(Math.random() * restaurants.length)];
+                addNotification(`📢 Flash Deal: 20% off at ${randomRest.name} for the next hour!`, 'info');
+            }
+        }, 8000);
+        return () => clearTimeout(marketingTimer);
+    }, [currentUser, restaurants, addNotification]);
 
     
      useEffect(() => {
@@ -84,8 +136,6 @@ const App: React.FC = () => {
                         setCurrentUser(prevUser => {
                             const isNew = !prevUser || !prevUser.linkedRestaurantIds?.includes(restaurantId);
                             if (isNew) {
-                                const restaurant = restaurants.find(r => r.id === restaurantId);
-                                addNotification(`You are now viewing ${restaurant?.name}!`, 'success');
                                 const updatedGuest = {
                                     ...GUEST_USER,
                                     linkedRestaurantIds: [...(prevUser?.linkedRestaurantIds || []), restaurantId]
@@ -129,28 +179,34 @@ const App: React.FC = () => {
         setNotifications(prev => prev.filter(n => n.id !== id));
     }, []);
     
-    const handleLogin = useCallback(async (username: string, password: string): Promise<boolean> => {
-        const user = await api.signInUser(username, password);
+    const handleLogin = useCallback(async (username: string, password: string): Promise<{success: boolean, error?: string}> => {
+        const { user, error } = await api.signInUser(username, password);
         if (user) {
             setCurrentUser(user);
             window.location.hash = '';
             addNotification(`Welcome back, ${user.name}!`, 'success');
-            return true;
+            return { success: true };
         }
-        addNotification('Invalid username or password.', 'error');
-        return false;
+        const errorMsg = error || 'Invalid credentials.';
+        addNotification(errorMsg, 'error');
+        return { success: false, error: errorMsg };
     }, [addNotification]);
 
     const handleLogout = useCallback(async () => {
-        addNotification(`Goodbye, ${currentUser?.name}!`, 'info');
-        await api.signOutUser();
+        try {
+            await api.signOutUser();
+        } catch(e) {
+            console.error("Logout error", e);
+        }
         setCurrentUser(null);
         window.location.hash = '';
         setCurrentView('login');
-    }, [currentUser, addNotification]);
+        addNotification(`Logged out.`, 'info');
+    }, [addNotification]);
     
     const handleExitToGuestView = useCallback(async () => {
-        await handleLogout();
+        await api.signOutUser(); 
+        setCurrentUser(GUEST_USER); 
         addNotification(`Exiting admin session. Now viewing as a guest.`, 'info');
         const firstRestaurantId = restaurants[0]?.id;
         if (firstRestaurantId) {
@@ -159,7 +215,7 @@ const App: React.FC = () => {
             window.location.hash = '';
             setCurrentView('login');
         }
-    }, [handleLogout, addNotification, restaurants]);
+    }, [addNotification, restaurants]);
 
     const handleAdminLoginNav = useCallback(() => {
         handleLogout();
@@ -169,13 +225,11 @@ const App: React.FC = () => {
         if (cart.length > 0 && cart[0].restaurantId !== item.restaurantId) {
             addNotification("You can only order from one restaurant at a time.", "error"); return;
         }
-        
         const newCartItem: CartItem = { ...item, cartItemId: Date.now() };
         setCart(prev => [...prev, newCartItem]);
         addNotification(`${item.name} added to cart!`, "success");
         setIsCartOpen(true);
     }, [cart, addNotification]);
-
 
     const handleRemoveFromCart = useCallback((cartItemId: number) => setCart(cart => cart.filter(item => item.cartItemId !== cartItemId)), []);
 
@@ -212,7 +266,7 @@ const App: React.FC = () => {
             setOrders(prev => [newOrder, ...prev]);
             setCart([]);
             setActiveOrderIds(prev => [...prev, newOrder.id]);
-            addNotification(`Order ${newOrder.id} placed successfully!`, "success");
+            addNotification(`Order ${newOrder.id.slice(0,8)}... placed!`, "success");
             navigateTo('orderStatus');
         } else {
             addNotification("Sorry, we couldn't place your order. Please try again.", "error");
@@ -223,9 +277,9 @@ const App: React.FC = () => {
         const updatedOrder = await api.updateOrderStatus(orderId, status, reason, currentUser?.id);
         if (updatedOrder) {
             setOrders(orders => orders.map(o => o.id === orderId ? updatedOrder : o));
-            addNotification(`Order ${orderId} status updated to "${status}"`, "info");
+            addNotification(`Order updated.`, "info");
         } else {
-            addNotification(`Failed to update order ${orderId}.`, "error");
+            addNotification(`Failed to update order.`, "error");
         }
     }, [addNotification, currentUser]);
 
@@ -265,7 +319,7 @@ const App: React.FC = () => {
         if (result) {
             setVendors(prev => [...prev, result.newVendor]);
             setUsers(prev => [...prev, result.newVendorAdmin]);
-            addNotification(`Vendor "${result.newVendor.name}" and admin user created!`, "success");
+            addNotification(`Vendor "${result.newVendor.name}" created!`, "success");
         } else {
             addNotification("Failed to create vendor.", "error");
         }
@@ -275,9 +329,9 @@ const App: React.FC = () => {
         const result = await api.createRestaurantAdmin(name, username, password, restaurantId, currentUser?.vendorId);
         if (result) {
             setUsers(prev => [...prev, result]);
-            addNotification(`Restaurant Admin "${name}" created with username: ${result.username}`, 'success');
+            addNotification(`Admin created!`, 'success');
         } else {
-            addNotification("Failed to create restaurant admin.", "error");
+            addNotification("Failed to create admin.", "error");
         }
     }, [currentUser, addNotification]);
 
@@ -295,7 +349,7 @@ const App: React.FC = () => {
         const success = await api.deleteVendor(vendorId);
         if (success) {
             fetchData();
-            addNotification('Vendor and all associated data deleted.', 'success');
+            addNotification('Vendor deleted.', 'success');
         } else {
             addNotification("Failed to delete vendor.", "error");
         }
@@ -331,8 +385,13 @@ const App: React.FC = () => {
     const handleOrderFinished = useCallback((orderId: string) => {
         setActiveOrderIds(prevIds => prevIds.filter(id => id !== orderId));
     }, []);
+    
+    const handleSendPushNotification = useCallback((message: string) => {
+        // In a real app, this would call an API. Here we simulate it by adding a notification immediately.
+        addNotification(message, 'info');
+    }, [addNotification]);
 
-    // --- TEMPLATE HANDLERS ---
+    // --- TEMPLATE HANDLERS (Same as before) ---
     const handleCreateBoardTemplate = useCallback(async (templateData: Omit<BoardTemplate, 'id'>) => {
         const newTemplate = await api.createBoardTemplate(templateData);
         if (newTemplate) { setBoardTemplates(p => [...p, newTemplate]); addNotification('Board template created!', 'success'); }
@@ -347,7 +406,6 @@ const App: React.FC = () => {
         const success = await api.deleteBoardTemplate(templateId);
         if (success) {
             setBoardTemplates(p => p.filter(t => t.id !== templateId));
-            const updatedRestaurants = await api.fetchRestaurants(); setRestaurants(updatedRestaurants);
             addNotification('Board template deleted.', 'success');
         } else {
             addNotification('Failed to delete board template.', 'error');
@@ -367,7 +425,6 @@ const App: React.FC = () => {
         const success = await api.deleteMenuTemplate(templateId);
         if (success) {
             setMenuTemplates(p => p.filter(t => t.id !== templateId));
-            const updatedRestaurants = await api.fetchRestaurants(); setRestaurants(updatedRestaurants);
             addNotification('Menu template deleted.', 'success');
         } else {
             addNotification('Failed to delete menu template.', 'error');
@@ -387,7 +444,6 @@ const App: React.FC = () => {
         const success = await api.deleteMenuItemTemplate(itemId);
         if (success) {
             setMenuItemTemplates(p => p.filter(i => i.id !== itemId));
-            const updatedMenus = await api.fetchMenuTemplates(); setMenuTemplates(updatedMenus);
             addNotification('Menu item deleted.', 'success');
         } else {
             addNotification('Failed to delete menu item.', 'error');
@@ -396,7 +452,13 @@ const App: React.FC = () => {
     
     const renderView = () => {
         if (isLoading) {
-            return <div className="flex justify-center items-center h-screen text-xl font-semibold">Loading Application...</div>;
+            return (
+                <div className="flex flex-col justify-center items-center h-screen space-y-4">
+                    <div className="text-xl font-semibold text-gray-700">Loading Application...</div>
+                    <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-sm text-gray-400">Connecting to database...</p>
+                </div>
+            );
         }
         
         if (currentView === 'login' || !currentUser) return <LoginPage onLogin={handleLogin} />;
@@ -405,7 +467,6 @@ const App: React.FC = () => {
             case 'restaurant':
                 const restaurant = restaurants.find(v => v.id === selectedRestaurantId);
                 const assignedMenuTemplates = restaurant?.assignedMenuTemplateIds?.map(id => menuTemplates.find(m => m.id === id)).filter(Boolean) as MenuTemplate[] || [];
-                
                 return restaurant ? <RestaurantPage restaurant={restaurant} menuTemplates={assignedMenuTemplates} allItems={menuItemTemplates} onAddToCart={handleAddToCart} onBack={() => navigateTo('home')} /> : <HomePage currentUser={currentUser} restaurants={restaurants} onSelectRestaurant={handleSelectRestaurant} />;
             
             case 'checkout':
@@ -432,6 +493,7 @@ const App: React.FC = () => {
                     onCreateBoardTemplate={handleCreateBoardTemplate} onUpdateBoardTemplate={handleUpdateBoardTemplate} onDeleteBoardTemplate={handleDeleteBoardTemplate}
                     onCreateMenuTemplate={handleCreateMenuTemplate} onUpdateMenuTemplate={handleUpdateMenuTemplate} onDeleteMenuTemplate={handleDeleteMenuTemplate}
                     onCreateMenuItemTemplate={handleCreateMenuItemTemplate} onUpdateMenuItemTemplate={handleUpdateMenuItemTemplate} onDeleteMenuItemTemplate={handleDeleteMenuItemTemplate}
+                    onSendPushNotification={handleSendPushNotification}
                     /> : <div>Dashboard access denied.</div>;
 
             case 'superAdminDashboard':
