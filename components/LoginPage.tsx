@@ -45,7 +45,10 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="max-w-md w-full bg-white p-8 rounded-lg shadow-lg">
-        <h2 className="text-3xl font-extrabold text-center text-secondary mb-2">FlowApp</h2>
+        <div className="text-center mb-6">
+            <h2 className="text-3xl font-extrabold text-secondary">FlowApp</h2>
+            <p className="text-sm text-primary font-medium tracking-wide">by FlowSync</p>
+        </div>
         <p className="text-center text-gray-600 mb-6">Administrator Sign In</p>
         <form onSubmit={handleSubmit} className="space-y-6">
           <fieldset disabled={isLoading || isSeeding}>
