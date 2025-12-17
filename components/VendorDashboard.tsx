@@ -1,8 +1,9 @@
+
 import React, { useState, useMemo } from 'react';
-import { Vendor, Restaurant, MenuItemTemplate, Order, User, UserRole, BoardTemplate, MenuTemplate, MenuSection } from '../types';
+import { Vendor, Restaurant, MenuItemTemplate, Order, User, UserRole, BoardTemplate, MenuTemplate, MenuSection, PaymentMethod } from '../types';
 import { 
     ChartIcon, SettingsIcon, MenuBookIcon, PlusIcon, EditIcon, TrashIcon,
-    ClipboardListIcon, UserIcon as PeopleIcon, SparklesIcon, XIcon
+    ClipboardListIcon, UserIcon as PeopleIcon, SparklesIcon, XIcon, StoreIcon
 } from './Shared';
 import Analytics from './Analytics';
 
@@ -38,7 +39,7 @@ const ConfirmationModal: React.FC<{
     </div>
 );
 
-// --- Sub-Managers (Simplified for brevity but functional) ---
+// --- Sub-Managers ---
 
 const OrderManager: React.FC<{ orders: Order[]; onUpdateStatus: (id: string, status: string) => void }> = ({ orders, onUpdateStatus }) => {
     const sortedOrders = [...orders].sort((a, b) => new Date(b.orderTime).getTime() - new Date(a.orderTime).getTime());
@@ -239,6 +240,127 @@ const SettingsManager: React.FC<{ restaurant: Restaurant; onUpdate: (r: Restaura
     );
 };
 
+const RestaurantManager: React.FC<{ 
+    vendorId: string;
+    restaurants: Restaurant[];
+    onCreate: (data: Omit<Restaurant, 'id'>) => void;
+    onDelete: (id: string) => void;
+}> = ({ vendorId, restaurants, onCreate, onDelete }) => {
+    const [isCreating, setIsCreating] = useState(false);
+    const [form, setForm] = useState({
+        name: '',
+        description: '',
+        address: '',
+        phone: '',
+        email: ''
+    });
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        const newRest: Omit<Restaurant, 'id'> = {
+            vendorId,
+            name: form.name,
+            description: form.description,
+            bannerUrl: `https://picsum.photos/1200/400?random=${Date.now()}`,
+            contact: {
+                address: form.address,
+                phone: form.phone,
+                email: form.email
+            },
+            openingHours: {
+                monday: { isOpen: true, open: '11:00', close: '22:00' },
+                tuesday: { isOpen: true, open: '11:00', close: '22:00' },
+                wednesday: { isOpen: true, open: '11:00', close: '22:00' },
+                thursday: { isOpen: true, open: '11:00', close: '22:00' },
+                friday: { isOpen: true, open: '11:00', close: '23:00' },
+                saturday: { isOpen: true, open: '11:00', close: '23:00' },
+                sunday: { isOpen: true, open: '11:00', close: '22:00' },
+            },
+            paymentMethods: [PaymentMethod.CreditCard, PaymentMethod.Cash],
+            branding: {
+                primaryColor: '#F97316',
+                logoUrl: `https://picsum.photos/200/200?random=${Date.now()}`
+            },
+            media: []
+        };
+        onCreate(newRest);
+        setIsCreating(false);
+        setForm({ name: '', description: '', address: '', phone: '', email: '' });
+    };
+
+    return (
+         <div className="space-y-6">
+            <div className="flex justify-between items-center">
+                <h3 className="text-xl font-bold">My Restaurants</h3>
+                <button onClick={() => setIsCreating(true)} className="flex items-center space-x-1 bg-primary text-white px-3 py-2 rounded hover:bg-orange-600">
+                    <PlusIcon className="w-5 h-5"/> <span>Add Restaurant</span>
+                </button>
+            </div>
+
+            {isCreating && (
+                <div className="bg-gray-100 p-6 rounded-lg shadow-inner">
+                    <h4 className="font-bold mb-4">New Restaurant Details</h4>
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-1">Name</label>
+                                <input required value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="w-full p-2 border rounded" placeholder="Restaurant Name" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1">Email</label>
+                                <input required type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} className="w-full p-2 border rounded" placeholder="contact@example.com" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1">Phone</label>
+                                <input required value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} className="w-full p-2 border rounded" placeholder="555-0123" />
+                            </div>
+                             <div>
+                                <label className="block text-sm font-medium mb-1">Address</label>
+                                <input required value={form.address} onChange={e => setForm({...form, address: e.target.value})} className="w-full p-2 border rounded" placeholder="123 Main St" />
+                            </div>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium mb-1">Description</label>
+                            <textarea required value={form.description} onChange={e => setForm({...form, description: e.target.value})} className="w-full p-2 border rounded" rows={3} placeholder="Short description..." />
+                        </div>
+                        <div className="flex justify-end space-x-3">
+                            <button type="button" onClick={() => setIsCreating(false)} className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400">Cancel</button>
+                            <button type="submit" className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">Create Restaurant</button>
+                        </div>
+                    </form>
+                </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {restaurants.map(r => (
+                    <div key={r.id} className="bg-white rounded-lg shadow overflow-hidden border">
+                         <div className="h-32 bg-gray-200 relative">
+                             <img src={r.bannerUrl} alt={r.name} className="w-full h-full object-cover" />
+                             <div className="absolute top-2 right-2">
+                                 <button onClick={() => { if(window.confirm(`Delete ${r.name}?`)) onDelete(r.id); }} className="p-1 bg-white rounded-full shadow hover:bg-red-50 text-red-600">
+                                     <TrashIcon className="w-5 h-5"/>
+                                 </button>
+                             </div>
+                         </div>
+                         <div className="p-4">
+                             <h4 className="font-bold text-lg">{r.name}</h4>
+                             <p className="text-sm text-gray-500 line-clamp-2">{r.description}</p>
+                             <div className="mt-4 pt-4 border-t text-sm text-gray-600">
+                                 <p>{r.contact.address}</p>
+                             </div>
+                         </div>
+                    </div>
+                ))}
+                {restaurants.length === 0 && !isCreating && (
+                    <div className="col-span-full text-center py-10 text-gray-500 bg-white rounded border border-dashed">
+                        No restaurants found. Click "Add Restaurant" to get started.
+                    </div>
+                )}
+            </div>
+         </div>
+    );
+}
+
 
 // --- Main Component ---
 
@@ -269,8 +391,8 @@ const VendorDashboard: React.FC<{
   onDeleteMenuItemTemplate: (itemId: string) => void;
   onSendPushNotification: (message: string) => void;
 }> = (props) => {
-    const { currentUser, restaurants, orders, users } = props;
-    const [activeTab, setActiveTab] = useState('orders');
+    const { currentUser, restaurants, orders, users, vendor } = props;
+    const [activeTab, setActiveTab] = useState(currentUser.role === UserRole.Vendor ? 'restaurants' : 'orders');
     const [selectedRestaurantId, setSelectedRestaurantId] = useState<string | null>(
         currentUser.role === UserRole.RestaurantAdmin ? currentUser.restaurantId! : (restaurants[0]?.id || null)
     );
@@ -283,6 +405,7 @@ const VendorDashboard: React.FC<{
     const filteredUsers = useMemo(() => users.filter(u => u.restaurantId === selectedRestaurantId), [users, selectedRestaurantId]);
 
     const tabs = useMemo(() => [
+        { id: 'restaurants', label: 'My Restaurants', icon: StoreIcon, visible: currentUser.role === UserRole.Vendor },
         { id: 'orders', label: 'Orders', icon: ClipboardListIcon, visible: currentUser.permissions?.canManageOrders ?? true },
         { id: 'analytics', label: 'Analytics', icon: ChartIcon, visible: currentUser.permissions?.canViewAnalytics ?? true },
         { id: 'marketing', label: 'Marketing', icon: SparklesIcon, visible: true },
@@ -299,11 +422,20 @@ const VendorDashboard: React.FC<{
     };
 
     const renderContent = () => {
-        if (!selectedRestaurant && activeTab !== 'menu') {
+        // Allow access to 'menu' and 'restaurants' tabs even without a selected restaurant
+        if (!selectedRestaurant && !['menu', 'restaurants'].includes(activeTab)) {
              return <div className="p-8 text-center text-gray-500">Please select a restaurant to manage.</div>;
         }
 
         switch (activeTab) {
+            case 'restaurants':
+                return <RestaurantManager 
+                    vendorId={vendor.id}
+                    restaurants={restaurants}
+                    onCreate={props.onCreateRestaurant}
+                    onDelete={props.onDeleteRestaurant}
+                />;
+
             case 'orders':
                 return <OrderManager orders={filteredOrders} onUpdateStatus={props.onUpdateOrderStatus} />;
             
@@ -367,7 +499,7 @@ const VendorDashboard: React.FC<{
         <div className="flex flex-col h-full bg-gray-50 p-6">
             <div className="mb-6 flex justify-between items-center">
                 <h2 className="text-3xl font-extrabold text-secondary">Vendor Dashboard</h2>
-                {currentUser.role === UserRole.Vendor && restaurants.length > 1 && (
+                {currentUser.role === UserRole.Vendor && restaurants.length > 0 && (
                     <select 
                         value={selectedRestaurantId || ''} 
                         onChange={e => setSelectedRestaurantId(e.target.value)}

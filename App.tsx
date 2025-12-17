@@ -30,6 +30,7 @@ const App: React.FC = () => {
     const [menuItemTemplates, setMenuItemTemplates] = useState<MenuItemTemplate[]>([]);
     const [cart, setCart] = useState<CartItem[]>([]);
     const [notifications, setNotifications] = useState<NotificationMessage[]>([]);
+    const [notificationInbox, setNotificationInbox] = useState<NotificationMessage[]>([]); // Persistent inbox
     const [activeOrderIds, setActiveOrderIds] = useState<string[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -40,7 +41,9 @@ const App: React.FC = () => {
 
     
     const addNotification = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
-        setNotifications(prev => [...prev, { id: Date.now(), message, type }]);
+        const newNotif = { id: Date.now(), message, type };
+        setNotifications(prev => [...prev, newNotif]); // Active toasts
+        setNotificationInbox(prev => [newNotif, ...prev].slice(0, 10)); // Persistent inbox (last 10)
     }, []);
 
     // --- DATA FETCHING (Public) ---
@@ -601,6 +604,8 @@ const App: React.FC = () => {
                     activeOrderCount={activeOrderIds.length}
                     onAdminLogin={handleAdminLoginNav}
                     onExitToGuestView={handleExitToGuestView}
+                    notifications={notificationInbox} // Pass persistent inbox
+                    onClearNotifications={() => setNotificationInbox([])}
                 />
             )}
             <main className="flex-grow">{renderView()}</main>

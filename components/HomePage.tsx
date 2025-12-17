@@ -36,21 +36,38 @@ const FeaturedMediaSection: React.FC<{ restaurants: Restaurant[] }> = ({ restaur
     if (videos.length === 0) return null;
 
     return (
-        <section className="mb-10">
-            <h2 className="text-2xl font-extrabold text-secondary mb-4 flex items-center">
-                <span className="bg-red-600 w-2 h-8 mr-3 rounded-full"></span>
-                Featured Videos & Updates
+        <section className="mb-12">
+            <h2 className="text-3xl font-extrabold text-secondary mb-6 flex items-center">
+                <span className="bg-gradient-to-r from-primary to-red-500 w-2 h-10 mr-4 rounded-full"></span>
+                Top Stories & Reels
             </h2>
-            <div className="flex space-x-4 overflow-x-auto pb-4 snap-x hide-scrollbar">
+            <div className="flex space-x-6 overflow-x-auto pb-6 snap-x hide-scrollbar px-2">
                 {videos.map((media, idx) => (
-                    <div key={idx} className="flex-shrink-0 w-80 h-48 bg-black rounded-xl overflow-hidden shadow-md snap-center relative group border border-gray-200">
-                        <video src={media.source} controls className="w-full h-full object-cover" poster="https://via.placeholder.com/320x190/000000/FFFFFF?text=Video+Preview" />
-                        <div className="absolute top-0 left-0 bg-black/60 text-white text-xs px-2 py-1 rounded-br-lg">
-                            {media.restaurantName}
+                    <div key={idx} className="flex-shrink-0 w-64 h-96 rounded-2xl overflow-hidden shadow-xl snap-center relative group transform transition-all duration-300 hover:scale-105 hover:shadow-2xl border-2 border-white cursor-pointer">
+                        <video 
+                            src={media.source} 
+                            controls={false}
+                            autoPlay={false} // Autoplay disabled by default for UX, can be enabled if muted
+                            muted
+                            loop
+                            className="w-full h-full object-cover group-hover:opacity-90 transition-opacity" 
+                            poster="https://via.placeholder.com/256x384/000000/FFFFFF?text=Loading..." 
+                            onMouseOver={event => (event.target as HTMLVideoElement).play()}
+                            onMouseOut={event => (event.target as HTMLVideoElement).pause()}
+                        />
+                        <div className="absolute top-4 left-4 right-4 flex justify-between items-start">
+                             <div className="bg-black/60 backdrop-blur-md text-white text-xs px-3 py-1 rounded-full font-semibold border border-white/20">
+                                {media.restaurantName}
+                            </div>
                         </div>
-                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-3 pointer-events-none">
-                            <p className="text-white font-bold text-sm truncate">{media.title}</p>
-                            <p className="text-gray-300 text-xs truncate">{media.description}</p>
+                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent p-5">
+                            <h3 className="text-white font-bold text-lg mb-1 leading-tight shadow-sm">{media.title}</h3>
+                            <p className="text-gray-200 text-xs line-clamp-2 opacity-90">{media.description}</p>
+                        </div>
+                        <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none flex items-center justify-center">
+                             <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center">
+                                 <svg className="w-8 h-8 text-white fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                             </div>
                         </div>
                     </div>
                 ))}
